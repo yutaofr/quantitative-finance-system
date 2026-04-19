@@ -8,19 +8,25 @@ from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.optimize import minimize  # type: ignore[import-untyped]
 
 from engine_types import Stance
 from errors import HMMConvergenceError
+from state.state_label_map import build_label_map
 
 STATE_COUNT = 3
 MATRIX_NDIM = 2
+TENSOR_NDIM = 3
 OBS_DIM = 6
 DEFAULT_MAX_ITER = 200
 DEFAULT_TOLERANCE = 1.0e-6
+DEFAULT_RESTARTS = 50
 LOGIT_CLIP_BOUND = 50.0
 COV_EPSILON = 1.0e-8
 TRANSITION_PROB_EPSILON = 1.0e-12
 GAUSSIAN_LOG_NORM = np.log(2.0 * np.pi)
+TRANSITION_L2_PENALTY = 1.0e-3
+DEFAULT_OPTIMIZER_MAX_ITER = 200
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +37,7 @@ class HMMModel:
     emission_mean: NDArray[np.float64]
     emission_cov: NDArray[np.float64]
     label_map: Mapping[int, Stance]
+    log_likelihood: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +65,31 @@ class HMMSmoothingResult:
     xi: NDArray[np.float64]
     parameter_mask: NDArray[np.bool_]
     log_likelihood: float
+
+
+@dataclass(frozen=True, slots=True)
+class _TransitionObjectiveData:
+    stay_weight: NDArray[np.float64]
+    leave_weight: NDArray[np.float64]
+    dwell: NDArray[np.float64]
+    h: NDArray[np.float64]
+    l2_penalty: float
+
+
+@dataclass(frozen=True, slots=True)
+class _FitData:
+    y_obs: NDArray[np.float64]
+    h: NDArray[np.float64]
+    forward_returns: NDArray[np.float64]
+    parameter_mask: NDArray[np.bool_]
+    log_initial: NDArray[np.float64]
+
+
+@dataclass(frozen=True, slots=True)
+class _FitConfig:
+    max_iter: int
+    tolerance: float
+    transition_max_iter: int
 
 
 def degraded_hmm_posterior() -> HMMPosterior:
@@ -309,6 +341,255 @@ def e_step_smooth(
     )
 
 
+def update_emission_parameters(
+    y_obs: NDArray[np.float64],
+    gamma: NDArray[np.float64],
+    parameter_mask: NDArray[np.bool_],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """pure. M-step update for emission means/covariances on usable history only."""
+    obs = np.asarray(y_obs, dtype=np.float64)
+    weights = np.asarray(gamma, dtype=np.float64)
+    mask = np.asarray(parameter_mask, dtype=np.bool_)
+    if obs.ndim != MATRIX_NDIM:
+        msg = "y_obs must be a 2D matrix"
+        raise ValueError(msg)
+    if weights.shape != (obs.shape[0], STATE_COUNT):
+        msg = "gamma must have shape (n_weeks, 3)"
+        raise ValueError(msg)
+    if mask.shape != (obs.shape[0],):
+        msg = "parameter_mask must align to y_obs rows"
+        raise ValueError(msg)
+    if not np.isfinite(obs).all() or not np.isfinite(weights).all() or np.any(weights < 0.0):
+        msg = "emission update inputs must be finite with nonnegative gamma"
+        raise ValueError(msg)
+
+    usable_obs = obs[mask]
+    usable_gamma = weights[mask]
+    means = np.empty((STATE_COUNT, obs.shape[1]), dtype=np.float64)
+    covs = np.empty((STATE_COUNT, obs.shape[1], obs.shape[1]), dtype=np.float64)
+    for state_idx in range(STATE_COUNT):
+        state_weights = usable_gamma[:, state_idx]
+        weight_sum = float(np.sum(state_weights))
+        if weight_sum <= 0.0:
+            msg = "each state must have positive mass for emission update"
+            raise HMMConvergenceError(msg)
+        means[state_idx] = np.sum(usable_obs * state_weights[:, None], axis=0) / weight_sum
+        covs[state_idx] = shrink_emission_covariance(usable_obs, state_weights)
+    return means, covs
+
+
+def _transition_objective(
+    beta: NDArray[np.float64],
+    data: _TransitionObjectiveData,
+) -> float:
+    logits = beta[0] + beta[1] * data.dwell + beta[2] * data.h
+    leave_prob = _sigmoid_clipped(logits)
+    log_leave = np.log(leave_prob)
+    log_stay = np.log1p(-leave_prob)
+    log_offdiag_share = np.log(float(STATE_COUNT - 1))
+    nll = -float(
+        np.sum(data.stay_weight * log_stay + data.leave_weight * (log_leave - log_offdiag_share)),
+    )
+    return nll + data.l2_penalty * float(np.sum(beta * beta))
+
+
+def fit_transition_coefs(
+    xi: NDArray[np.float64],
+    dwell: NDArray[np.float64],
+    h: NDArray[np.float64],
+    *,
+    l2_penalty: float = TRANSITION_L2_PENALTY,
+    max_iter: int = DEFAULT_OPTIMIZER_MAX_ITER,
+) -> NDArray[np.float64]:
+    """pure. M-step logistic fit for SRD §7.1 time-inhomogeneous transition hazards."""
+    xi_values = np.asarray(xi, dtype=np.float64)
+    dwell_values = np.asarray(dwell, dtype=np.float64)
+    h_values = np.asarray(h, dtype=np.float64)
+    if xi_values.ndim != TENSOR_NDIM or xi_values.shape[1:] != (STATE_COUNT, STATE_COUNT):
+        msg = "xi must have shape (n_transitions, 3, 3)"
+        raise ValueError(msg)
+    if dwell_values.shape != (xi_values.shape[0], STATE_COUNT):
+        msg = "dwell must have shape (n_transitions, 3)"
+        raise ValueError(msg)
+    if h_values.shape != (xi_values.shape[0],):
+        msg = "h must have shape (n_transitions,)"
+        raise ValueError(msg)
+    if (
+        not np.isfinite(xi_values).all()
+        or not np.isfinite(dwell_values).all()
+        or not np.isfinite(h_values).all()
+        or np.any(xi_values < 0.0)
+    ):
+        msg = "transition fit inputs must be finite with nonnegative xi"
+        raise ValueError(msg)
+    if max_iter <= 0:
+        msg = "transition optimizer failed before starting"
+        raise HMMConvergenceError(msg)
+
+    coefs = np.empty((STATE_COUNT, STATE_COUNT), dtype=np.float64)
+    for state_idx in range(STATE_COUNT):
+        stay_weight = xi_values[:, state_idx, state_idx]
+        leave_weight = np.sum(xi_values[:, state_idx, :], axis=1) - stay_weight
+        objective_data = _TransitionObjectiveData(
+            stay_weight=stay_weight,
+            leave_weight=leave_weight,
+            dwell=dwell_values[:, state_idx],
+            h=h_values,
+            l2_penalty=l2_penalty,
+        )
+
+        result = minimize(
+            lambda beta, data=objective_data: _transition_objective(beta, data),
+            x0=np.zeros(STATE_COUNT, dtype=np.float64),
+            method="L-BFGS-B",
+            options={"maxiter": max_iter},
+        )
+        if not result.success or not np.isfinite(result.fun):
+            msg = f"transition optimizer failed for state {state_idx}"
+            raise HMMConvergenceError(msg)
+        coefs[state_idx] = np.asarray(result.x, dtype=np.float64)
+    return coefs
+
+
+def _soft_assign_to_means(
+    y_obs: NDArray[np.float64],
+    means: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    sq_dist = np.sum((y_obs[:, None, :] - means[None, :, :]) ** 2, axis=2)
+    logits = -sq_dist
+    logits -= np.max(logits, axis=1, keepdims=True)
+    weights = np.exp(logits)
+    return cast(NDArray[np.float64], weights / np.sum(weights, axis=1, keepdims=True))
+
+
+def _log_emission_matrix(
+    y_obs: NDArray[np.float64],
+    emission_mean: NDArray[np.float64],
+    emission_cov: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    values = np.empty((y_obs.shape[0], STATE_COUNT), dtype=np.float64)
+    for state_idx in range(STATE_COUNT):
+        values[:, state_idx] = gaussian_log_likelihood(
+            y_obs,
+            emission_mean[state_idx],
+            emission_cov[state_idx],
+        )
+    return values
+
+
+def _dwell_from_gamma(gamma: NDArray[np.float64]) -> NDArray[np.float64]:
+    path = np.argmax(gamma, axis=1)
+    dwell = np.empty((max(gamma.shape[0] - 1, 0), STATE_COUNT), dtype=np.float64)
+    durations = np.ones(STATE_COUNT, dtype=np.float64)
+    for time_idx in range(dwell.shape[0]):
+        dwell[time_idx] = durations
+        current_state = int(path[time_idx])
+        next_state = int(path[time_idx + 1])
+        if next_state == current_state:
+            durations[next_state] += 1.0
+        else:
+            durations[next_state] = 1.0
+    return dwell
+
+
+def _log_transition_matrices(
+    transition_coefs: NDArray[np.float64],
+    dwell: NDArray[np.float64],
+    h: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    matrices = np.empty((dwell.shape[0], STATE_COUNT, STATE_COUNT), dtype=np.float64)
+    for time_idx in range(dwell.shape[0]):
+        transition = transition_matrix_t(transition_coefs, dwell[time_idx], float(h[time_idx]))
+        matrices[time_idx] = np.log(transition)
+    return matrices
+
+
+def _validate_forward_returns(
+    forward_52w_returns: NDArray[np.float64] | None,
+    n_obs: int,
+) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    if forward_52w_returns is None:
+        msg = "forward_52w_returns is required for SRD §7.2 label identification"
+        raise HMMConvergenceError(msg)
+    returns = np.asarray(forward_52w_returns, dtype=np.float64)
+    if returns.shape != (n_obs,):
+        msg = "forward_52w_returns must align to y_obs rows"
+        raise ValueError(msg)
+    usable = np.isfinite(returns)
+    _validate_usable_mask(usable, n_obs)
+    return returns, usable
+
+
+def _label_map_from_gamma_returns(
+    gamma: NDArray[np.float64],
+    forward_returns: NDArray[np.float64],
+    parameter_mask: NDArray[np.bool_],
+) -> Mapping[int, Stance]:
+    averages: dict[int, float] = {}
+    for state_idx in range(STATE_COUNT):
+        weights = gamma[parameter_mask, state_idx]
+        total = float(np.sum(weights))
+        if total <= 0.0:
+            msg = "each state must have positive mass for label identification"
+            raise HMMConvergenceError(msg)
+        averages[state_idx] = float(np.sum(weights * forward_returns[parameter_mask]) / total)
+    return build_label_map(averages)
+
+
+def _run_hmm_restart(
+    data: _FitData,
+    generator: np.random.Generator,
+    config: _FitConfig,
+) -> HMMModel:
+    means = initialize_emission_means_kmeans_pp(
+        data.y_obs,
+        generator,
+        usable_mask=data.parameter_mask,
+    )
+    gamma = _soft_assign_to_means(data.y_obs, means)
+    means, covs = update_emission_parameters(data.y_obs, gamma, data.parameter_mask)
+    transition_coefs = np.zeros((STATE_COUNT, STATE_COUNT), dtype=np.float64)
+    previous_log_likelihood = -np.inf
+
+    for _iteration in range(config.max_iter):
+        log_emission = _log_emission_matrix(data.y_obs, means, covs)
+        dwell = _dwell_from_gamma(gamma)
+        log_transition = _log_transition_matrices(transition_coefs, dwell, data.h)
+        smoothing = e_step_smooth(
+            data.log_initial,
+            log_transition,
+            log_emission,
+            usable_mask=data.parameter_mask,
+        )
+        improvement = smoothing.log_likelihood - previous_log_likelihood
+        gamma = smoothing.gamma
+        means, covs = update_emission_parameters(data.y_obs, gamma, data.parameter_mask)
+        if smoothing.xi.shape[0] > 0:
+            transition_coefs = fit_transition_coefs(
+                smoothing.xi,
+                dwell[: smoothing.xi.shape[0]],
+                data.h[: smoothing.xi.shape[0]],
+                max_iter=config.transition_max_iter,
+            )
+        if np.isfinite(previous_log_likelihood) and abs(improvement) < config.tolerance:
+            label_map = _label_map_from_gamma_returns(
+                gamma,
+                data.forward_returns,
+                data.parameter_mask,
+            )
+            return HMMModel(
+                transition_coefs=transition_coefs,
+                emission_mean=means,
+                emission_cov=covs,
+                label_map=label_map,
+                log_likelihood=smoothing.log_likelihood,
+            )
+        previous_log_likelihood = smoothing.log_likelihood
+
+    msg = "HMM EM did not converge within max_iter"
+    raise HMMConvergenceError(msg)
+
+
 def initialize_emission_means_kmeans_pp(
     y_obs: NDArray[np.float64],
     rng: np.random.Generator,
@@ -374,16 +655,19 @@ def _validate_fit_inputs(y_obs: NDArray[np.float64], h: NDArray[np.float64]) -> 
         raise ValueError(msg)
 
 
-def fit_hmm(
+def fit_hmm(  # noqa: PLR0913
     y_obs: NDArray[np.float64],
     h: NDArray[np.float64],
     rng: np.random.Generator,
     *,
     max_iter: int = DEFAULT_MAX_ITER,
     tolerance: float = DEFAULT_TOLERANCE,
+    restarts: int = DEFAULT_RESTARTS,
+    forward_52w_returns: NDArray[np.float64] | None = None,
+    transition_max_iter: int = DEFAULT_OPTIMIZER_MAX_ITER,
 ) -> HMMModel:
     """pure. Fit TI-HMM deterministically for given inputs and injected rng."""
-    _require_generator(rng)
+    generator = _require_generator(rng)
     _validate_fit_inputs(y_obs, h)
     if max_iter <= 0:
         msg = "HMM EM did not converge within max_iter"
@@ -391,5 +675,41 @@ def fit_hmm(
     if tolerance <= 0.0 or not np.isfinite(tolerance):
         msg = "HMM tolerance must be finite and positive"
         raise ValueError(msg)
+    if restarts <= 0:
+        msg = "HMM restarts must be positive"
+        raise ValueError(msg)
+    forward_returns, parameter_mask = _validate_forward_returns(forward_52w_returns, y_obs.shape[0])
+    log_initial = np.log(np.full(STATE_COUNT, 1.0 / float(STATE_COUNT), dtype=np.float64))
+    data = _FitData(
+        y_obs=y_obs,
+        h=h,
+        forward_returns=forward_returns,
+        parameter_mask=parameter_mask,
+        log_initial=log_initial,
+    )
+    config = _FitConfig(
+        max_iter=max_iter,
+        tolerance=tolerance,
+        transition_max_iter=transition_max_iter,
+    )
 
-    raise NotImplementedError("SRD §7 right-censor-aware TI-HMM EM is not implemented yet.")
+    best_model: HMMModel | None = None
+    best_log_likelihood = -np.inf
+    last_error: Exception | None = None
+    for _ in range(restarts):
+        try:
+            candidate = _run_hmm_restart(data, generator, config)
+            if candidate.log_likelihood > best_log_likelihood:
+                best_model = candidate
+                best_log_likelihood = candidate.log_likelihood
+        except (HMMConvergenceError, ValueError) as exc:
+            last_error = exc
+            continue
+
+    if best_model is None:
+        if last_error is not None:
+            msg = f"HMM EM did not converge in any restart: {last_error}"
+            raise HMMConvergenceError(msg) from last_error
+        msg = "HMM EM did not converge in any restart"
+        raise HMMConvergenceError(msg)
+    return best_model

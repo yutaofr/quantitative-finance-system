@@ -47,3 +47,43 @@ def test_fit_hmm_rejects_non_finite_observations() -> None:
 
     with pytest.raises(ValueError, match="finite"):
         fit_hmm(y_obs, np.array([0.1, 0.2, 0.3], dtype=np.float64), rng=np.random.default_rng(1))
+
+
+def test_fit_hmm_returns_best_converged_model_with_label_map() -> None:
+    y_obs = np.array(
+        [
+            [-3.0, -3.0, 0.0, 0.0, 0.1, 0.1],
+            [-2.8, -3.1, 0.0, 0.0, 0.2, 0.1],
+            [0.0, 0.1, 0.0, 0.0, 1.0, 0.5],
+            [0.2, -0.1, 0.0, 0.0, 1.1, 0.4],
+            [3.0, 3.0, 0.0, 0.0, 2.0, 0.9],
+            [3.2, 2.9, 0.0, 0.0, 2.1, 0.8],
+        ],
+        dtype=np.float64,
+    )
+    forward_returns = np.array([-0.2, -0.1, 0.02, 0.03, 0.12, 0.15], dtype=np.float64)
+
+    model = fit_hmm(
+        y_obs,
+        h=np.zeros(6, dtype=np.float64),
+        rng=np.random.default_rng(4),
+        forward_52w_returns=forward_returns,
+        restarts=2,
+        max_iter=20,
+        tolerance=1.0e-4,
+    )
+
+    assert model.transition_coefs.shape == (3, 3)
+    assert model.emission_mean.shape == (3, 6)
+    assert model.emission_cov.shape == (3, 6, 6)
+    assert set(model.label_map.values()) == {"DEFENSIVE", "NEUTRAL", "OFFENSIVE"}
+
+
+def test_fit_hmm_requires_forward_returns_for_label_identification() -> None:
+    with pytest.raises(HMMConvergenceError, match="forward_52w_returns"):
+        fit_hmm(
+            _obs(),
+            np.array([0.1, 0.2, 0.3], dtype=np.float64),
+            rng=np.random.default_rng(1),
+            max_iter=1,
+        )
