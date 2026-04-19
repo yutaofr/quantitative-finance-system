@@ -7,11 +7,13 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from app.cli import ExitCode
 from config_types import FrozenConfig
 from engine_types import TimeSeries, VintageMode, WeeklyOutput
 from errors import HMMConvergenceError, QuantileSolverError
 from inference.weekly import TrainingArtifacts, blocked_weekly_output, degraded_weekly_output
+
+EXIT_OK = 0
+EXIT_BLOCKED = 2
 
 FetchSeries = Callable[[date, VintageMode], Mapping[str, TimeSeries]]
 LoadTrainingArtifacts = Callable[[], TrainingArtifacts]
@@ -52,7 +54,7 @@ def run_weekly_job(
             hmm_status="em_nonconverge",
         )
         deps.write_output(output, output_path)
-        return int(ExitCode.OK)
+        return EXIT_OK
     except QuantileSolverError:
         output = blocked_weekly_output(
             as_of,
@@ -60,9 +62,9 @@ def run_weekly_job(
             quantile_solver_status="failed",
         )
         deps.write_output(output, output_path)
-        return int(ExitCode.BLOCKED)
+        return EXIT_BLOCKED
 
     deps.write_output(output, output_path)
     if output.mode == "BLOCKED":
-        return int(ExitCode.BLOCKED)
-    return int(ExitCode.OK)
+        return EXIT_BLOCKED
+    return EXIT_OK

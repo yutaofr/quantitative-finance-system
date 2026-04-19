@@ -1,11 +1,101 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from app.cli import ExitCode, run
+from config_types import FrozenConfig
 
 
 def test_health_returns_ok() -> None:
     assert run(["--health"]) == int(ExitCode.OK)
 
 
-def test_weekly_refuses_placeholder_output() -> None:
-    assert run(["weekly", "--as-of", "2024-12-27"]) == int(ExitCode.BLOCKED)
+def _config() -> FrozenConfig:
+    return FrozenConfig(
+        srd_version="8.7",
+        random_seed=8675309,
+        timezone="America/New_York",
+        missing_rate_degraded=0.10,
+        missing_rate_blocked=0.20,
+        quantile_gap=1.0e-4,
+        l2_alpha=2.0,
+        tail_mult=0.6,
+        utility_lambda=1.2,
+        utility_kappa=0.8,
+        band=7.0,
+        score_min=0.0,
+        score_max=100.0,
+        block_lengths=(52, 78),
+        bootstrap_replications=2000,
+    )
+
+
+def test_weekly_uses_normalized_artifact_path_and_config_once(tmp_path: Path) -> None:
+    seen: dict[str, object] = {}
+    artifacts_root = tmp_path / "artifacts"
+
+    def load_config(
+        env: dict[str, str],
+        overrides: dict[str, object] | None,
+    ) -> FrozenConfig:
+        seen["env"] = dict(env)
+        seen["overrides"] = dict(overrides or {})
+        return _config()
+
+    def run_weekly_job(
+        *,
+        as_of: object,
+        vintage_mode: str,
+        cfg: FrozenConfig,
+        output_path: Path,
+        deps: object,
+    ) -> int:
+        seen["as_of"] = as_of
+        seen["vintage_mode"] = vintage_mode
+        seen["cfg"] = cfg
+        seen["output_path"] = output_path
+        seen["deps"] = deps
+        return int(ExitCode.OK)
+
+    assert run(
+        ["weekly", "--as-of", "2024-12-27", "--artifacts-root", str(artifacts_root)],
+        deps_overrides={
+            "load_config": load_config,
+            "run_weekly_job": run_weekly_job,
+            "weekly_runner_deps": object(),
+        },
+        environ={"TZ": "America/New_York"},
+    ) == int(ExitCode.OK)
+    assert seen["vintage_mode"] == "strict"
+    assert seen["cfg"] == _config()
+    assert seen["output_path"] == (
+        artifacts_root / "weekly" / "as_of=2024-12-27" / "production_output.json"
+    )
+
+
+def test_verify_uses_same_artifact_directory_convention(tmp_path: Path) -> None:
+    seen: dict[str, Path] = {}
+    artifacts_root = tmp_path / "artifacts"
+
+    def load_config(
+        _env: dict[str, str],
+        _overrides: dict[str, object] | None,
+    ) -> FrozenConfig:
+        return _config()
+
+    def verify_artifact(*, as_of: object, output_path: Path, cfg: FrozenConfig) -> int:
+        del as_of, cfg
+        seen["output_path"] = output_path
+        return int(ExitCode.HASH_MISMATCH)
+
+    assert run(
+        ["verify", "--as-of", "2024-12-27", "--artifacts-root", str(artifacts_root)],
+        deps_overrides={
+            "load_config": load_config,
+            "verify_artifact": verify_artifact,
+        },
+        environ={"TZ": "America/New_York"},
+    ) == int(ExitCode.HASH_MISMATCH)
+    assert seen["output_path"] == (
+        artifacts_root / "weekly" / "as_of=2024-12-27" / "production_output.json"
+    )

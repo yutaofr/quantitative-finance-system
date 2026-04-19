@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Literal
 
 
@@ -25,3 +26,4 @@ class FrozenConfig:
     score_max: float
     block_lengths: tuple[int, ...]
     bootstrap_replications: int
+    strict_pit_start: date = date(2012, 1, 6)
