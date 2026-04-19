@@ -44,4 +44,3 @@ class FeatureFrame:
     x_scaled: NDArray[np.float64]
     missing_mask: NDArray[np.bool_]
     metadata: Mapping[str, str]
-
