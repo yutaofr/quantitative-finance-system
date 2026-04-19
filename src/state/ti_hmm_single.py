@@ -50,6 +50,16 @@ class HMMFilterResult:
     log_likelihood: float
 
 
+@dataclass(frozen=True, slots=True)
+class HMMSmoothingResult:
+    """pure. E-step posterior weights for usable history and right-censored tail."""
+
+    gamma: NDArray[np.float64]
+    xi: NDArray[np.float64]
+    parameter_mask: NDArray[np.bool_]
+    log_likelihood: float
+
+
 def degraded_hmm_posterior() -> HMMPosterior:
     """pure. Return SRD §7.3 fallback posterior."""
     return HMMPosterior(
@@ -230,6 +240,73 @@ def log_forward_filter(
         log_likelihood += norm
 
     return HMMFilterResult(log_alpha=log_alpha, log_likelihood=log_likelihood)
+
+
+def _validate_usable_mask(usable_mask: NDArray[np.bool_], n_obs: int) -> NDArray[np.bool_]:
+    usable = np.asarray(usable_mask, dtype=np.bool_)
+    if usable.shape != (n_obs,):
+        msg = "usable_mask must align to observation weeks"
+        raise ValueError(msg)
+    if not usable.any():
+        msg = "usable_mask must include at least one usable week"
+        raise HMMConvergenceError(msg)
+    usable_indices = np.flatnonzero(usable)
+    usable_end = int(usable_indices[-1]) + 1
+    if np.any(~usable[:usable_end]):
+        msg = "usable_mask must be a contiguous historical prefix"
+        raise ValueError(msg)
+    return usable
+
+
+def _log_backward_smooth(
+    log_transition: NDArray[np.float64],
+    log_emission: NDArray[np.float64],
+    usable_end: int,
+) -> NDArray[np.float64]:
+    log_beta = np.zeros((usable_end, STATE_COUNT), dtype=np.float64)
+    for time_idx in range(usable_end - 2, -1, -1):
+        next_terms = log_transition[time_idx] + log_emission[time_idx + 1] + log_beta[time_idx + 1]
+        log_beta[time_idx] = cast(NDArray[np.float64], logsumexp_stable(next_terms, axis=1))
+    return log_beta
+
+
+def e_step_smooth(
+    log_initial: NDArray[np.float64],
+    log_transition: NDArray[np.float64],
+    log_emission: NDArray[np.float64],
+    *,
+    usable_mask: NDArray[np.bool_],
+) -> HMMSmoothingResult:
+    """pure. Compute log-space E-step posteriors with right-censored tail handling."""
+    filtering = log_forward_filter(log_initial, log_transition, log_emission)
+    usable = _validate_usable_mask(usable_mask, log_emission.shape[0])
+    usable_end = int(np.flatnonzero(usable)[-1]) + 1
+
+    gamma = np.exp(filtering.log_alpha)
+    xi_count = max(usable_end - 1, 0)
+    xi = np.empty((xi_count, STATE_COUNT, STATE_COUNT), dtype=np.float64)
+    if xi_count > 0:
+        log_beta = _log_backward_smooth(log_transition, log_emission, usable_end)
+        log_gamma = filtering.log_alpha[:usable_end] + log_beta
+        log_gamma -= cast(NDArray[np.float64], logsumexp_stable(log_gamma, axis=1))[:, None]
+        gamma[:usable_end] = np.exp(log_gamma)
+
+        for time_idx in range(xi_count):
+            log_xi_t = (
+                filtering.log_alpha[time_idx, :, None]
+                + log_transition[time_idx]
+                + log_emission[time_idx + 1, None, :]
+                + log_beta[time_idx + 1, None, :]
+            )
+            log_xi_t -= float(logsumexp_stable(log_xi_t.reshape(-1)))
+            xi[time_idx] = np.exp(log_xi_t)
+
+    return HMMSmoothingResult(
+        gamma=gamma,
+        xi=xi,
+        parameter_mask=usable.copy(),
+        log_likelihood=filtering.log_likelihood,
+    )
 
 
 def initialize_emission_means_kmeans_pp(
