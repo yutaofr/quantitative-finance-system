@@ -21,6 +21,9 @@ OBS_DIM = 6
 DEFAULT_MAX_ITER = 200
 DEFAULT_TOLERANCE = 1.0e-6
 DEFAULT_RESTARTS = 50
+DEGENERATE_OCCUPANCY_WINDOW = 26
+DEGENERATE_OCCUPANCY_THRESHOLD = 0.01
+POSTERIOR_SUM_TOLERANCE = 1.0e-8
 LOGIT_CLIP_BOUND = 50.0
 COV_EPSILON = 1.0e-8
 TRANSITION_PROB_EPSILON = 1.0e-12
@@ -99,6 +102,60 @@ def degraded_hmm_posterior() -> HMMPosterior:
         state_name="NEUTRAL",
         model_status="DEGRADED",
     )
+
+
+def has_invalid_posterior(posterior: NDArray[np.float64]) -> bool:
+    """pure. Return whether posterior violates SRD §7.3 finite/simplex requirements."""
+    post = np.asarray(posterior, dtype=np.float64)
+    if post.ndim != MATRIX_NDIM or post.shape[1] != STATE_COUNT:
+        return True
+    if not np.isfinite(post).all() or np.any(post < 0.0):
+        return True
+    row_sums = np.sum(post, axis=1)
+    return bool(np.any(np.abs(row_sums - 1.0) > POSTERIOR_SUM_TOLERANCE))
+
+
+def has_degenerate_state_occupancy(
+    posterior: NDArray[np.float64],
+    *,
+    window: int = DEGENERATE_OCCUPANCY_WINDOW,
+    threshold: float = DEGENERATE_OCCUPANCY_THRESHOLD,
+) -> bool:
+    """pure. Detect SRD §7.3 state starvation over a consecutive rolling window."""
+    post = np.asarray(posterior, dtype=np.float64)
+    if has_invalid_posterior(post):
+        return True
+    if post.shape[0] < window:
+        return False
+    for end_idx in range(window, post.shape[0] + 1):
+        means = np.mean(post[end_idx - window : end_idx], axis=0)
+        if np.any(means < threshold):
+            return True
+    return False
+
+
+def has_label_order_flip(
+    persisted_label_map: Mapping[int, Stance],
+    refit_forward_returns_by_state: Mapping[int, float],
+) -> bool:
+    """pure. Detect SRD §7.3 semantic label-order flip after rolling refit."""
+    return build_label_map(refit_forward_returns_by_state) != dict(persisted_label_map)
+
+
+def should_degrade_hmm(
+    posterior: NDArray[np.float64],
+    *,
+    persisted_label_map: Mapping[int, Stance],
+    refit_forward_returns_by_state: Mapping[int, float] | None = None,
+) -> bool:
+    """pure. Combine SRD §7.3 HMM degradation guards."""
+    if has_invalid_posterior(posterior):
+        return True
+    if has_degenerate_state_occupancy(posterior):
+        return True
+    if refit_forward_returns_by_state is not None:
+        return has_label_order_flip(persisted_label_map, refit_forward_returns_by_state)
+    return False
 
 
 def logsumexp_stable(
