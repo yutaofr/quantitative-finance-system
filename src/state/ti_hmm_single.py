@@ -42,6 +42,14 @@ class HMMPosterior:
     model_status: str
 
 
+@dataclass(frozen=True, slots=True)
+class HMMFilterResult:
+    """pure. Log-space filtered posterior path and total log-likelihood."""
+
+    log_alpha: NDArray[np.float64]
+    log_likelihood: float
+
+
 def degraded_hmm_posterior() -> HMMPosterior:
     """pure. Return SRD §7.3 fallback posterior."""
     return HMMPosterior(
@@ -176,6 +184,98 @@ def gaussian_log_likelihood(
     log_det = 2.0 * float(np.sum(np.log(np.diag(chol))))
     dim = float(mu.shape[0])
     return cast(NDArray[np.float64], -0.5 * (dim * GAUSSIAN_LOG_NORM + log_det + mahalanobis))
+
+
+def log_forward_filter(
+    log_initial: NDArray[np.float64],
+    log_transition: NDArray[np.float64],
+    log_emission: NDArray[np.float64],
+) -> HMMFilterResult:
+    """pure. Run normalized HMM forward filtering strictly in log-space."""
+    initial = np.asarray(log_initial, dtype=np.float64)
+    transition = np.asarray(log_transition, dtype=np.float64)
+    emission = np.asarray(log_emission, dtype=np.float64)
+    if initial.shape != (STATE_COUNT,):
+        msg = "log_initial must have shape (3,)"
+        raise ValueError(msg)
+    if emission.ndim != MATRIX_NDIM or emission.shape[1] != STATE_COUNT:
+        msg = "log_emission must have shape (n_weeks, 3)"
+        raise ValueError(msg)
+    if transition.shape != (emission.shape[0] - 1, STATE_COUNT, STATE_COUNT):
+        msg = "log_transition must have shape (n_weeks - 1, 3, 3)"
+        raise ValueError(msg)
+    if (
+        not np.isfinite(initial).all()
+        or not np.isfinite(transition).all()
+        or not np.isfinite(emission).all()
+    ):
+        msg = "forward filter inputs must be finite log-probabilities"
+        raise ValueError(msg)
+
+    log_alpha = np.empty_like(emission, dtype=np.float64)
+    first_joint = initial + emission[0]
+    first_norm = float(logsumexp_stable(first_joint))
+    log_alpha[0] = first_joint - first_norm
+    log_likelihood = first_norm
+
+    for time_idx in range(1, emission.shape[0]):
+        previous = log_alpha[time_idx - 1]
+        predicted = cast(
+            NDArray[np.float64],
+            logsumexp_stable(previous[:, None] + transition[time_idx - 1], axis=0),
+        )
+        joint = predicted + emission[time_idx]
+        norm = float(logsumexp_stable(joint))
+        log_alpha[time_idx] = joint - norm
+        log_likelihood += norm
+
+    return HMMFilterResult(log_alpha=log_alpha, log_likelihood=log_likelihood)
+
+
+def initialize_emission_means_kmeans_pp(
+    y_obs: NDArray[np.float64],
+    rng: np.random.Generator,
+    *,
+    state_count: int = STATE_COUNT,
+    usable_mask: NDArray[np.bool_] | None = None,
+) -> NDArray[np.float64]:
+    """pure. Choose deterministic K-Means++ emission seeds for injected rng."""
+    generator = _require_generator(rng)
+    obs = np.asarray(y_obs, dtype=np.float64)
+    if obs.ndim != MATRIX_NDIM:
+        msg = "y_obs must be a 2D matrix"
+        raise ValueError(msg)
+    if not np.isfinite(obs).all():
+        msg = "y_obs must be finite"
+        raise ValueError(msg)
+    if usable_mask is None:
+        usable = np.ones(obs.shape[0], dtype=np.bool_)
+    else:
+        usable = np.asarray(usable_mask, dtype=np.bool_)
+        if usable.shape != (obs.shape[0],):
+            msg = "usable_mask must align to y_obs rows"
+            raise ValueError(msg)
+    candidates = obs[usable]
+    if candidates.shape[0] < state_count:
+        msg = "not enough usable observations for K-Means++ initialization"
+        raise HMMConvergenceError(msg)
+
+    means = np.empty((state_count, obs.shape[1]), dtype=np.float64)
+    first_idx = int(generator.integers(0, candidates.shape[0]))
+    means[0] = candidates[first_idx]
+    min_sq_dist = np.sum((candidates - means[0]) ** 2, axis=1)
+    for state_idx in range(1, state_count):
+        total = float(np.sum(min_sq_dist))
+        if total <= 0.0:
+            unused = np.flatnonzero(min_sq_dist == 0.0)
+            chosen_idx = int(unused[min(state_idx, unused.shape[0] - 1)])
+        else:
+            probs = min_sq_dist / total
+            chosen_idx = int(generator.choice(candidates.shape[0], p=probs))
+        means[state_idx] = candidates[chosen_idx]
+        new_sq_dist = np.sum((candidates - means[state_idx]) ** 2, axis=1)
+        min_sq_dist = np.minimum(min_sq_dist, new_sq_dist)
+    return means
 
 
 def _require_generator(rng: object) -> np.random.Generator:
