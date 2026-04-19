@@ -13,3 +13,7 @@ class VintageUnavailableError(LawEngineError):
 
 class HMMConvergenceError(LawEngineError):
     """Raised when HMM EM cannot return a converged production model."""
+
+
+class QuantileSolverError(LawEngineError):
+    """Raised when the conditional law quantile optimizer cannot return a valid fit."""
