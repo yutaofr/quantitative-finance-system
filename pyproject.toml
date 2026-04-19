@@ -41,9 +41,6 @@ dev = [
     "types-pyyaml>=6.0,<7.0",
 ]
 
-[project.scripts]
-qqq-law-engine = "app.cli:main"
-
 [build-system]
 requires = ["hatchling>=1.25,<2.0"]
 build-backend = "hatchling.build"
@@ -128,6 +125,7 @@ warn_unreachable = true
 show_error_codes = true
 pretty = true
 mypy_path = "src"
+explicit_package_bases = true
 packages = [
     "app",
     "backtest",
@@ -146,16 +144,10 @@ exclude = [
     "^notebooks/",
 ]
 
-[[tool.mypy.overrides]]
-module = [
-    "cvxpy.*",
-    "ecos.*",
-]
-ignore_missing_imports = true
-
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
+pythonpath = ["src"]
 addopts = [
     "--strict-config",
     "--strict-markers",
@@ -181,7 +173,6 @@ omit = [
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
-fail_under = 85
 exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",

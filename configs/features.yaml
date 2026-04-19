@@ -1,0 +1,4 @@
+feature_count: 10
+hard_clip_bound: 5
+soft_squash_scale: 4
+mad_epsilon: 1.0e-8

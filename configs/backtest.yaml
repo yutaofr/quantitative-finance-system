@@ -1,0 +1,6 @@
+block_lengths:
+  - 52
+  - 78
+bootstrap_replications: 2000
+coverage_tol: 0.03
+strict_pit_start: "2012-01-06"

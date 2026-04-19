@@ -31,7 +31,7 @@ jobs:
         run: uv run pytest -q tests/test_research_isolation.py
 
       - name: import-linter (layered contract)
-        run: uv run lint-imports --config pyproject.toml
+        run: PYTHONPATH=src uv run lint-imports --config pyproject.toml
 
       - name: grep for forbidden series in production code
         run: |

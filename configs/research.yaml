@@ -1,0 +1,3 @@
+enabled: true
+output_name: research_report.json
+may_use_research_only_series: true

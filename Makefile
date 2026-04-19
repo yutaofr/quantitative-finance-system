@@ -90,12 +90,12 @@ test: ## Run the default local test suite.
 .PHONY: purity
 purity: ## Run FP purity, layer boundary, and anti-pattern checks.
 	$(UV) run pytest -q tests/test_fp_purity.py tests/test_layer_boundaries.py tests/test_antipatterns.py
-	$(UV) run lint-imports --config pyproject.toml
+	PYTHONPATH=src $(UV) run lint-imports --config pyproject.toml
 
 .PHONY: research-firewall
 research-firewall: ## Run production/research isolation checks.
 	$(UV) run pytest -q tests/test_research_isolation.py tests/test_output_schema_strict.py tests/test_research_output_isolation.py
-	$(UV) run lint-imports --config pyproject.toml
+	PYTHONPATH=src $(UV) run lint-imports --config pyproject.toml
 
 .PHONY: acceptance
 acceptance: ## Run SRD section 16 acceptance tests.

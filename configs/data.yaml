@@ -1,0 +1,15 @@
+weekly_anchor:
+  weekday: friday
+  time: "16:00"
+  timezone: America/New_York
+vintage_modes:
+  pseudo_start: "2001-02-02"
+  pseudo_end: "2011-12-30"
+  strict_start: "2012-01-06"
+forbidden_in_prod:
+  - NFCI
+  - NFCIRISK
+  - NFCICREDIT
+  - NFCILEVERAGE
+  - NFCINONFINLEVERAGE
+  - STLFSI4

@@ -36,6 +36,10 @@ data/processed/**
 artifacts/weekly/**
 artifacts/backtest/**
 !artifacts/.gitkeep
+!artifacts/weekly/
+!artifacts/weekly/.gitkeep
+!artifacts/backtest/
+!artifacts/backtest/.gitkeep
 # Training artifacts ARE source-controlled (SRD §7.2, §9.3, §9.4).
 # They live under artifacts/training/ and are committed explicitly.
 !artifacts/training/

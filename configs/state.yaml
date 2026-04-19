@@ -1,0 +1,4 @@
+states: 3
+em_restarts: 50
+missing_rate_degraded: 0.10
+missing_rate_blocked: 0.20

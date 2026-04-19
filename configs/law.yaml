@@ -1,0 +1,9 @@
+quantile_gap: 1.0e-4
+l2_alpha: 2.0
+tail_mult: 0.6
+quantiles:
+  - 0.10
+  - 0.25
+  - 0.50
+  - 0.75
+  - 0.90

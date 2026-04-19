@@ -5,6 +5,8 @@
 ARG PYTHON_VERSION=3.11.9
 ARG UV_VERSION=0.4.18
 
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uvbin
+
 # ---------------------------------------------------------------------------
 # Stage 1: base (shared by deps / src / test)
 # ---------------------------------------------------------------------------
@@ -12,6 +14,7 @@ FROM python:${PYTHON_VERSION}-slim-bookworm AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
     PIP_NO_CACHE_DIR=1 \
     UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
@@ -32,7 +35,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # 安装 uv（pin 版本）
-COPY --from=ghcr.io/astral-sh/uv:${UV_VERSION} /uv /usr/local/bin/uv
+COPY --from=uvbin /uv /usr/local/bin/uv
 
 WORKDIR /app
 
@@ -71,6 +74,7 @@ FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
     PATH="/app/.venv/bin:$PATH" \
     TZ=America/New_York \
     OMP_NUM_THREADS=1 \
