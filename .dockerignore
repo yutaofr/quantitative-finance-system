@@ -1,0 +1,58 @@
+# .dockerignore — keep Docker build context lean, deterministic, and secret-free.
+
+# credentials
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+venv/
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# git
+.git/
+.gitignore
+
+# local data & artifacts (mounted at runtime, not baked into image)
+data/
+artifacts/
+notebooks/**/.ipynb_checkpoints/
+!data/.gitkeep
+!artifacts/.gitkeep
+
+# Large fixtures are mounted or generated for test jobs, not baked by default.
+tests/golden/**/*.parquet
+tests/fixtures/alfred_raw/**
+
+# docs are not required by Dockerfile runtime stages
+docs/
+*.md
+!README.md
+
+# CI
+.github/
+
+# local compose overrides
+docker-compose.override.yml

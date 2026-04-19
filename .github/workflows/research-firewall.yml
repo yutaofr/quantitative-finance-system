@@ -1,0 +1,59 @@
+name: research-firewall
+
+# Enforces SRD §12 and §17-#10:
+#   No production module imports from src/research/**
+#   No research-only series appears in src/features/** or src/data_contract/*block_builder*
+#   production_output.json schema rejects unknown fields
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  firewall:
+    name: production ⇏ research
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.4.18"
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+
+      - name: AST-level isolation test
+        run: uv run pytest -q tests/test_research_isolation.py
+
+      - name: import-linter (layered contract)
+        run: uv run lint-imports --config pyproject.toml
+
+      - name: grep for forbidden series in production code
+        run: |
+          set -e
+          # Forbidden series IDs must never appear under src/features or src/inference or src/app
+          forbidden=(
+            NFCI NFCIRISK NFCICREDIT NFCILEVERAGE NFCINONFINLEVERAGE
+            STLFSI4
+            A679RC1Q027SBEA Y005RC1A027NBEA IPG3344S CAPUTLG3344SQ
+          )
+          fail=0
+          for id in "${forbidden[@]}"; do
+            if grep -rn --include='*.py' -E "\b${id}\b" \
+                 src/features src/inference src/app src/decision src/law src/state src/backtest; then
+              echo "::error::Forbidden series '${id}' referenced in production code."
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: JSON schema strictness (unknown field rejection)
+        run: uv run pytest -q tests/test_output_schema_strict.py
+
+      - name: Verify research sidecar writes only research_report.json
+        run: uv run pytest -q tests/test_research_output_isolation.py

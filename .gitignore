@@ -1,0 +1,48 @@
+# Credentials
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.hypothesis/
+*.egg-info/
+dist/
+build/
+
+# Virtualenv
+.venv/
+venv/
+
+# IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Data & artifacts (large, per-environment, not source-controlled)
+data/raw/**
+data/processed/**
+!data/.gitkeep
+artifacts/weekly/**
+artifacts/backtest/**
+!artifacts/.gitkeep
+# Training artifacts ARE source-controlled (SRD §7.2, §9.3, §9.4).
+# They live under artifacts/training/ and are committed explicitly.
+!artifacts/training/
+!artifacts/training/**
+
+# Notebook checkpoints
+notebooks/**/.ipynb_checkpoints/
+
+# Docker
+docker-compose.override.yml

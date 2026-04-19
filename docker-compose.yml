@@ -1,0 +1,115 @@
+# docker-compose.yml
+# QQQ Cycle-Conditional Law Engine — local Mac runtime.
+# Aligned with ADD §6.1–§6.5.
+
+x-engine-common: &engine-common
+  image: qqq-law-engine:${IMAGE_TAG:-dev}
+  env_file:
+    - .env
+  environment:
+    SRD_VERSION: "8.7"
+    PYTHONFAULTHANDLER: "1"
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    TZ: ${TZ:-America/New_York}
+  user: "1000:1000"
+  read_only: true
+  tmpfs:
+    - /tmp:rw,size=64m
+  networks:
+    - lawnet
+  restart: "no"
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  # -----------------------------------------------------------------
+  # engine: 生产路径（weekly / backtest / train / verify / health）
+  # -----------------------------------------------------------------
+  engine:
+    <<: *engine-common
+    container_name: qqq-engine
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+      args:
+        PYTHON_VERSION: "3.11.9"
+        UV_VERSION: "0.4.18"
+    volumes:
+      - ./data:/app/data:rw
+      - ./artifacts:/app/artifacts:rw
+      - ./configs:/app/configs:ro
+    command: ["${RUN_MODE:-weekly}", "--as-of", "${AS_OF:-auto}"]
+
+  # -----------------------------------------------------------------
+  # research-sidecar: 研究路径（写 research_report.json，不读写生产合约）
+  # -----------------------------------------------------------------
+  research-sidecar:
+    <<: *engine-common
+    container_name: qqq-research-sidecar
+    entrypoint: ["python", "-m", "research.sidecar"]
+    command: ["--as-of", "${AS_OF:-auto}"]
+    depends_on:
+      engine:
+        condition: service_completed_successfully
+    volumes:
+      - ./data:/app/data:ro          # 只读原始数据
+      - ./artifacts:/app/artifacts:rw
+      - ./configs:/app/configs:ro
+    profiles: ["sidecar", "full"]
+
+  # -----------------------------------------------------------------
+  # jupyter: 仅开发用（profile=dev），只读 artifacts
+  # -----------------------------------------------------------------
+  jupyter:
+    <<: *engine-common
+    container_name: qqq-jupyter
+    entrypoint: ["python", "-m", "jupyterlab.labapp"]
+    command:
+      - "--ip=0.0.0.0"
+      - "--port=8888"
+      - "--no-browser"
+      - "--ServerApp.token="
+      - "--ServerApp.password="
+    environment:
+      SRD_VERSION: "8.7"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TZ: ${TZ:-America/New_York}
+      JUPYTER_ENABLE_LAB: "yes"
+    ports:
+      - "127.0.0.1:8888:8888"
+    volumes:
+      - ./artifacts:/app/artifacts:ro
+      - ./docs:/app/docs:ro
+      - ./notebooks:/app/notebooks:rw
+    read_only: false                 # jupyter 需要写 checkpoint
+    profiles: ["dev"]
+
+  # -----------------------------------------------------------------
+  # mock-fred: CI / 离线测试；提供金样本 ALFRED 静态响应
+  # -----------------------------------------------------------------
+  mock-fred:
+    image: wiremock/wiremock:3.9.1
+    container_name: qqq-mock-fred
+    command:
+      - "--port=8080"
+      - "--root-dir=/home/wiremock"
+      - "--verbose"
+    volumes:
+      - ./tests/fixtures/wiremock:/home/wiremock:ro
+    networks:
+      - lawnet
+    profiles: ["ci", "offline"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/__admin/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+networks:
+  lawnet:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "true"

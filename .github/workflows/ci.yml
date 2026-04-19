@@ -1,0 +1,234 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11"
+  UV_VERSION: "0.4.18"
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  TZ: America/New_York
+
+jobs:
+  # -----------------------------------------------------------------
+  # 1. Lint & format
+  # -----------------------------------------------------------------
+  lint:
+    name: lint (ruff)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - name: Sync dev deps
+        run: uv sync --frozen --extra dev
+      - name: ruff check
+        run: uv run ruff check .
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+  # -----------------------------------------------------------------
+  # 2. Type check
+  # -----------------------------------------------------------------
+  type:
+    name: type (mypy --strict)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+      - run: uv run mypy --strict src/ tests/
+
+  # -----------------------------------------------------------------
+  # 3. FP purity & layer boundaries
+  # -----------------------------------------------------------------
+  fp-purity:
+    name: fp-purity & layer-boundaries
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+      - name: Run purity tests
+        run: |
+          uv run pytest -q \
+            tests/test_fp_purity.py \
+            tests/test_layer_boundaries.py \
+            tests/test_antipatterns.py
+      - name: import-linter (architecture contract)
+        run: uv run lint-imports --config pyproject.toml
+
+  # -----------------------------------------------------------------
+  # 4. env-contract & config consistency
+  # -----------------------------------------------------------------
+  contracts:
+    name: contracts (.env / configs)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+      - run: |
+          uv run pytest -q \
+            tests/test_env_contract.py \
+            tests/test_config_consistency.py
+
+  # -----------------------------------------------------------------
+  # 5. Unit / Contract / Property tests (no network)
+  # -----------------------------------------------------------------
+  unit:
+    name: unit & property
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+      - name: Run unit+contract+property tests (no network, shard ${{ matrix.shard }}/4)
+        run: |
+          uv run pytest -q \
+            -m "not acceptance and not slow and not integration" \
+            --shard-id=${{ matrix.shard }} --num-shards=4 \
+            --cov=src --cov-report=xml --cov-branch
+      - name: Upload coverage (shard ${{ matrix.shard }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.shard }}
+          path: coverage.xml
+
+  # -----------------------------------------------------------------
+  # 6. Coverage gate (aggregate)
+  # -----------------------------------------------------------------
+  coverage-gate:
+    name: coverage gate (≥85% / domain ≥95%)
+    needs: [unit]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: ./.cov
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+      - name: Combine & enforce thresholds
+        run: |
+          uv run python tools/combine_coverage.py ./.cov/coverage-*/coverage.xml \
+            --global-min 85 --domain-min 95 \
+            --domain-paths src/features src/state src/law src/decision
+
+  # -----------------------------------------------------------------
+  # 7. Integration tests (docker compose + golden snapshots + mock-fred)
+  # -----------------------------------------------------------------
+  integration:
+    name: integration (docker compose + golden snapshots)
+    runs-on: ubuntu-22.04
+    needs: [lint, type, fp-purity, contracts]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build test image
+        run: docker build --target test -t qqq-law-engine:test .
+      - name: Start mock FRED
+        run: docker compose --profile ci up -d mock-fred
+      - name: Wait for mock-fred health
+        run: |
+          for i in $(seq 1 30); do
+            docker compose --profile ci ps mock-fred | grep -q "healthy" && break
+            sleep 2
+          done
+      - name: Run integration tests against mock-fred
+        env:
+          FRED_API_BASE_URL: http://mock-fred:8080
+          FRED_API_KEY: test-key
+          NASDAQ_DL_API_KEY: test-key
+        run: |
+          docker run --rm \
+            --network $(docker network ls -q -f name=lawnet) \
+            -e FRED_API_BASE_URL=http://mock-fred:8080 \
+            -e FRED_API_KEY=test-key \
+            -e NASDAQ_DL_API_KEY=test-key \
+            -v ${{ github.workspace }}/tests:/app/tests:ro \
+            -v ${{ github.workspace }}/tests/golden:/app/tests/golden:ro \
+            qqq-law-engine:test \
+            uv run pytest -q -m integration
+      - name: Tear down
+        if: always()
+        run: docker compose --profile ci down -v
+
+  # -----------------------------------------------------------------
+  # 8. Determinism (run twice, byte-equal)
+  # -----------------------------------------------------------------
+  determinism:
+    name: determinism (bytes-equal across runs)
+    runs-on: ubuntu-22.04
+    needs: [integration]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+      - run: uv run pytest -q tests/test_determinism.py
+
+  # -----------------------------------------------------------------
+  # 9. Symlink integrity (AGENTS.md / CLAUDE.md / GEMINI.md)
+  # -----------------------------------------------------------------
+  agent-symlinks:
+    name: AGENTS.md symlink integrity
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: python tools/check_agent_symlinks.py
+
+  # -----------------------------------------------------------------
+  # 10. Summary
+  # -----------------------------------------------------------------
+  ci-pass:
+    name: ci pass
+    needs:
+      - lint
+      - type
+      - fp-purity
+      - contracts
+      - unit
+      - coverage-gate
+      - integration
+      - determinism
+      - agent-symlinks
+    runs-on: ubuntu-22.04
+    steps:
+      - run: echo "All CI gates green."
