@@ -16,6 +16,7 @@ from backtest.walkforward import BacktestResult
 from config_types import FrozenConfig
 from data_contract.derived_series import derive_rv20_nasdaq100
 from data_contract.fred_adapter import FredClient
+from data_contract.nasdaq_client import NasdaqClient
 from engine_types import TimeSeries, VintageMode, WeeklyOutput
 from inference.train import build_training_artifacts
 from inference.weekly import TrainingArtifacts, run_weekly
@@ -38,17 +39,19 @@ def build_weekly_runner_deps(
     secrets: AdapterSecrets,
     *,
     cache_root: Path = Path("data/raw/fred"),
+    nasdaq_cache_root: Path = Path("data/raw/nasdaq"),
     training_root: Path = Path("artifacts/training"),
 ) -> WeeklyRunnerDeps:
     """io: Build real weekly shell dependencies from adapter secrets and paths."""
     client = FredClient(api_key=secrets.fred_api_key, cache_root=cache_root)
+    nasdaq_client = NasdaqClient(api_key=secrets.nasdaq_dl_api_key, cache_root=nasdaq_cache_root)
 
     def fetch_series(as_of: date, vintage_mode: VintageMode) -> dict[str, TimeSeries]:
         fetched = {
             series_id: client.get_series(series_id, as_of, vintage_mode)
             for series_id in REQUIRED_SERIES
         }
-        price_series = client.get_series(DERIVED_PRICE_SERIES, as_of, vintage_mode)
+        price_series = nasdaq_client.get_series(DERIVED_PRICE_SERIES, as_of)
         fetched["RV20_NDX"] = derive_rv20_nasdaq100(price_series, as_of)
         return fetched
 
@@ -74,6 +77,7 @@ def build_weekly_runner_deps(
 
 def _fetch_training_series(
     client: FredClient,
+    nasdaq_client: NasdaqClient,
     as_of: date,
     vintage_mode: VintageMode,
 ) -> dict[str, TimeSeries]:
@@ -81,7 +85,7 @@ def _fetch_training_series(
         series_id: client.get_series(series_id, as_of, vintage_mode)
         for series_id in REQUIRED_SERIES
     }
-    price_series = client.get_series(DERIVED_PRICE_SERIES, as_of, vintage_mode)
+    price_series = nasdaq_client.get_series(DERIVED_PRICE_SERIES, as_of)
     fetched[DERIVED_PRICE_SERIES] = price_series
     fetched["RV20_NDX"] = derive_rv20_nasdaq100(price_series, as_of)
     return fetched
@@ -91,12 +95,14 @@ def build_train_runner_deps(
     secrets: AdapterSecrets,
     *,
     cache_root: Path = Path("data/raw/fred"),
+    nasdaq_cache_root: Path = Path("data/raw/nasdaq"),
 ) -> TrainRunnerDeps:
     """io: Build real training shell dependencies from adapter secrets."""
     client = FredClient(api_key=secrets.fred_api_key, cache_root=cache_root)
+    nasdaq_client = NasdaqClient(api_key=secrets.nasdaq_dl_api_key, cache_root=nasdaq_cache_root)
 
     def fetch_series(as_of: date, vintage_mode: VintageMode) -> dict[str, TimeSeries]:
-        return _fetch_training_series(client, as_of, vintage_mode)
+        return _fetch_training_series(client, nasdaq_client, as_of, vintage_mode)
 
     def fit_training_artifacts(
         as_of: date,
@@ -123,9 +129,12 @@ def build_backtest_runner_deps(
     secrets: AdapterSecrets,
     *,
     cache_root: Path = Path("data/raw/fred"),
+    nasdaq_cache_root: Path = Path("data/raw/nasdaq"),
 ) -> BacktestRunnerDeps:
     """io: Build real walk-forward backtest dependencies from adapter secrets."""
-    train_deps = build_train_runner_deps(secrets, cache_root=cache_root)
+    train_deps = build_train_runner_deps(
+        secrets, cache_root=cache_root, nasdaq_cache_root=nasdaq_cache_root
+    )
 
     def fit_training_artifacts(
         as_of: date,

@@ -68,10 +68,10 @@ def _merge_runtime_values(  # noqa: PLR0913
 
 
 def load_frozen_config(
-    *,
-    config_dir: Path = DEFAULT_CONFIG_DIR,
     env: Mapping[str, str] | None = None,
     overrides: Mapping[str, object] | None = None,
+    *,
+    config_dir: Path = DEFAULT_CONFIG_DIR,
 ) -> FrozenConfig:
     """io: Load yaml once, merge CLI > env > yaml, and freeze runtime config."""
     merged_env = {} if env is None else dict(env)
