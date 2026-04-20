@@ -97,7 +97,7 @@ flowchart LR
     user[["👤 Quant Researcher"]]
     fred[("FRED / ALFRED<br/>HTTPS API")]
     cboe[("CBOE / Yahoo<br/>(VXN,VIX,VXV)")]
-    nas[("Nasdaq Data Link<br/>(NASDAQXNDX TR)")]
+    nas[("Yahoo Finance<br/>(^XNDX / NASDAQXNDX TR)")]
 
     subgraph system["QQQ Law Engine (this repo)"]
         prod[["production<br/>pipeline"]]
@@ -127,7 +127,7 @@ flowchart LR
 ```mermaid
 flowchart TB
     subgraph host["Mac Host"]
-        env[/".env<br/>(FRED_API_KEY,<br/>NASDAQ_DL_KEY,...)"/]
+        env[/".env<br/>(FRED_API_KEY,<br/>CBOE_TOKEN,...)"/]
         vol_data[/"./data<br/>(parquet cache)"/]
         vol_art[/"./artifacts<br/>(JSON outputs)"/]
     end
@@ -373,7 +373,11 @@ class VintageSpec:
     note: str
 
 REGISTRY: Mapping[str, VintageSpec] = {
-    "NASDAQXNDX": VintageSpec("NASDAQXNDX", date(1985, 10, 1), "daily close, no revision"),
+    "NASDAQXNDX": VintageSpec(
+        "NASDAQXNDX",
+        date(1985, 10, 1),
+        "daily close, no revision; Yahoo Finance ^XNDX",
+    ),
     "DGS10":      VintageSpec("DGS10",      date(1962, 1, 2),  "daily"),
     "DGS2":       VintageSpec("DGS2",       date(1976, 6, 1),  "daily"),
     "DGS1":       VintageSpec("DGS1",       date(1962, 1, 2),  "daily; risk-free"),
@@ -770,7 +774,7 @@ flowchart LR
     folder_art -. read-only .-> jupyter
     folder_cfg -.- engine
 
-    engine -- "network: 出站仅 ALFRED/FRED/Nasdaq<br/>docker-compose 配置 allowlist" --> internet((Internet))
+    engine -- "network: 出站仅 ALFRED/FRED/Yahoo/CBOE<br/>docker-compose 配置 allowlist" --> internet((Internet))
     sidecar -- "network: 可访问被禁用系列<br/>(NFCI 等)" --> internet
     mock -. CI only .- engine
 ```
@@ -851,12 +855,11 @@ flowchart LR
     class env_file secret
 ```
 
-必需键（仅 4 项，最小凭据集）：
+必需键（最小凭据集）：
 
 | 键                   | 用途                             | 必需?           |
 | -------------------- | -------------------------------- | --------------- |
 | `FRED_API_KEY`       | FRED / ALFRED                    | ✔               |
-| `NASDAQ_DL_API_KEY`  | `NASDAQXNDX` 总回报              | ✔               |
 | `CBOE_TOKEN`         | VXN/VIX/VXV 真实历史来源（可选） | ✔（或公开 CSV 镜像） |
 | `TZ`                 | 容器时区                          | 默认 `America/New_York` |
 

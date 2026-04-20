@@ -143,7 +143,7 @@ Series-level earliest strict-PIT dates (as of writing) that the agent MUST hard-
 
 | Series       | earliest_strict_pit | notes                                 |
 |--------------|---------------------|---------------------------------------|
-| `NASDAQXNDX` | 1985-10-01          | daily close, no revision              |
+| `NASDAQXNDX` | 1985-10-01          | daily close, no revision; free source = Yahoo Finance `^XNDX` |
 | `DGS10`      | 1962-01-02          | daily                                 |
 | `DGS2`       | 1976-06-01          | daily                                 |
 | `DGS1`       | 1962-01-02          | daily                                 |

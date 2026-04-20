@@ -81,20 +81,19 @@ def test_load_adapter_secrets_keeps_credentials_out_of_frozen_config(tmp_path: P
         config_dir=config_dir,
         env={
             "FRED_API_KEY": "fred-secret",
-            "NASDAQ_DL_API_KEY": "nasdaq-secret",
             "CBOE_TOKEN": "cboe-secret",
         },
     )
     secrets = load_adapter_secrets(
         {
             "FRED_API_KEY": "fred-secret",
-            "NASDAQ_DL_API_KEY": "nasdaq-secret",
             "CBOE_TOKEN": "cboe-secret",
         },
     )
 
     assert isinstance(secrets, AdapterSecrets)
     assert not hasattr(cfg, "FRED_API_KEY")
+    assert not hasattr(secrets, "nasdaq_dl_api_key")
     assert secrets.fred_api_key == "fred-secret"
 
 

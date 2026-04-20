@@ -44,7 +44,7 @@ def build_weekly_runner_deps(
 ) -> WeeklyRunnerDeps:
     """io: Build real weekly shell dependencies from adapter secrets and paths."""
     client = FredClient(api_key=secrets.fred_api_key, cache_root=cache_root)
-    nasdaq_client = NasdaqClient(api_key=secrets.nasdaq_dl_api_key, cache_root=nasdaq_cache_root)
+    nasdaq_client = NasdaqClient(cache_root=nasdaq_cache_root)
 
     def fetch_series(as_of: date, vintage_mode: VintageMode) -> dict[str, TimeSeries]:
         fetched = {
@@ -99,7 +99,7 @@ def build_train_runner_deps(
 ) -> TrainRunnerDeps:
     """io: Build real training shell dependencies from adapter secrets."""
     client = FredClient(api_key=secrets.fred_api_key, cache_root=cache_root)
-    nasdaq_client = NasdaqClient(api_key=secrets.nasdaq_dl_api_key, cache_root=nasdaq_cache_root)
+    nasdaq_client = NasdaqClient(cache_root=nasdaq_cache_root)
 
     def fetch_series(as_of: date, vintage_mode: VintageMode) -> dict[str, TimeSeries]:
         return _fetch_training_series(client, nasdaq_client, as_of, vintage_mode)

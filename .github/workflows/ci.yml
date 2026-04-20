@@ -173,13 +173,11 @@ jobs:
         env:
           FRED_API_BASE_URL: http://mock-fred:8080
           FRED_API_KEY: test-key
-          NASDAQ_DL_API_KEY: test-key
         run: |
           docker run --rm \
             --network $(docker network ls -q -f name=lawnet) \
             -e FRED_API_BASE_URL=http://mock-fred:8080 \
             -e FRED_API_KEY=test-key \
-            -e NASDAQ_DL_API_KEY=test-key \
             -v ${{ github.workspace }}/tests:/app/tests:ro \
             -v ${{ github.workspace }}/tests/golden:/app/tests/golden:ro \
             qqq-law-engine:test \

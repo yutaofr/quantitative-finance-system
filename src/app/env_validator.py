@@ -7,7 +7,6 @@ from pathlib import Path
 REQUIRED_ENV_KEYS = frozenset(
     {
         "FRED_API_KEY",
-        "NASDAQ_DL_API_KEY",
         "CBOE_TOKEN",
         "TZ",
         "LOG_LEVEL",

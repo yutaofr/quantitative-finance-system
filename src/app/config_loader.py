@@ -22,7 +22,6 @@ class AdapterSecrets:
     """io: Adapter credential bundle kept out of FrozenConfig."""
 
     fred_api_key: str
-    nasdaq_dl_api_key: str
     cboe_token: str
 
 
@@ -92,7 +91,6 @@ def load_adapter_secrets(env: Mapping[str, str]) -> AdapterSecrets:
     """io: Extract adapter credentials without mixing them into FrozenConfig."""
     return AdapterSecrets(
         fred_api_key=env.get("FRED_API_KEY", ""),
-        nasdaq_dl_api_key=env.get("NASDAQ_DL_API_KEY", ""),
         cboe_token=env.get("CBOE_TOKEN", ""),
     )
 

@@ -1,64 +1,56 @@
-"""Nasdaq Data Link adapter for NASDAQXNDX total-return daily close.
+"""Yahoo Finance adapter for NASDAQXNDX total-return daily close.
 
 ADD §3.1: src/data_contract/nasdaq_client.py
 ADD §4.5 cache path: data/raw/nasdaq/{series_id}/close.parquet
 SRD §4.3: NASDAQXNDX earliest_strict_pit = 1985-10-01, daily close, no revision.
-
-[NEEDS-HUMAN] The Nasdaq Data Link dataset code NASDAQOMX/COMP-NASDAQXNDX is inferred
-from the public dataset catalogue.  Confirm this is the correct dataset code before
-using in production.  If the API returns 404, replace NASDAQXNDX_DATASET below.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
-import json
 from pathlib import Path
-from typing import Any, cast
-from urllib.parse import urlencode
-from urllib.request import urlopen
+from typing import cast
 
 import numpy as np
 import pandas as pd
 
 from engine_types import TimeSeries
 
-# [NEEDS-HUMAN] Confirm exact Nasdaq Data Link dataset code for NASDAQXNDX total return.
-NASDAQ_DL_BASE_URL = "https://data.nasdaq.com/api/v3/datasets"
-NASDAQXNDX_DATASET = "NASDAQOMX/COMP-NASDAQXNDX"
+YAHOO_XNDX_SYMBOL = "^XNDX"
 
-# SRD §4.3 table — earliest date NASDAQXNDX data exists on Nasdaq Data Link.
+# SRD §4.3 table — earliest date NASDAQXNDX data exists.
 _NASDAQXNDX_EARLIEST = date(1985, 10, 1)
 
-FetchJson = Callable[[str], Mapping[str, object]]
+FetchHistory = Callable[[str, date], pd.DataFrame]
 
 
-def _default_fetch_json(url: str) -> Mapping[str, object]:
-    with urlopen(url, timeout=30) as response:  # noqa: S310
-        return cast(Mapping[str, object], json.loads(response.read().decode("utf-8")))
+def _default_fetch_history(symbol: str, start_date: date) -> pd.DataFrame:
+    """io: Fetch daily history from the free Yahoo Finance aggregate endpoint."""
+    import yfinance as yf  # type: ignore[import-untyped]
+
+    ticker = yf.Ticker(symbol)
+    return cast(
+        pd.DataFrame,
+        ticker.history(start=start_date.isoformat(), auto_adjust=False),
+    )
 
 
 @dataclass(frozen=True, slots=True)
 class NasdaqClient:
-    """io: Fetch NASDAQXNDX daily close from Nasdaq Data Link; cache append-only parquet.
+    """io: Fetch NASDAQXNDX daily close from Yahoo Finance; cache append-only parquet.
 
     NASDAQXNDX has no revisions (SRD §4.3 "daily close, no revision"), so
     is_pseudo_pit is always False.  The cache file grows monotonically as
     new dates are appended; existing rows are never overwritten.
     """
 
-    api_key: str
     cache_root: Path = Path("data/raw/nasdaq")
-    fetch_json: FetchJson = _default_fetch_json
+    fetch_history: FetchHistory = _default_fetch_history
 
     def _cache_path(self, series_id: str) -> Path:
         return self.cache_root / series_id.upper() / "close.parquet"
-
-    def _build_url(self, start_date: date) -> str:
-        query = urlencode({"api_key": self.api_key, "start_date": start_date.isoformat()})
-        return f"{NASDAQ_DL_BASE_URL}/{NASDAQXNDX_DATASET}.json?{query}"
 
     def _load_cached(self, path: Path) -> pd.DataFrame | None:
         """io: Read cached parquet; returns DataFrame with columns [date, close] or None."""
@@ -69,24 +61,15 @@ class NasdaqClient:
         return df
 
     def _fetch_rows(self, start_date: date) -> pd.DataFrame:
-        """io: Fetch rows from Nasdaq Data Link starting at start_date."""
-        payload = self.fetch_json(self._build_url(start_date))
-        dataset_data = cast(Mapping[str, Any], payload["dataset_data"])
-        column_names = cast(list[str], dataset_data["column_names"])
-        rows = cast(list[list[Any]], dataset_data["data"])
+        """io: Fetch rows from Yahoo Finance starting at start_date."""
+        history = self.fetch_history(YAHOO_XNDX_SYMBOL, start_date)
+        if "Close" not in history.columns:
+            msg = "Yahoo ^XNDX history response must include a Close column"
+            raise ValueError(msg)
 
-        # Locate the price column; NASDAQOMX datasets use "Index Value" at position 1.
-        close_col_idx = 1
-        for i, col in enumerate(column_names):
-            if col.lower() in ("index value", "close", "value"):
-                close_col_idx = i
-                break
-
-        dates: list[date] = []
-        closes: list[float] = []
-        for row in rows:
-            dates.append(date.fromisoformat(str(row[0])))
-            closes.append(float(row[close_col_idx]))
+        close = history["Close"].dropna()
+        dates = [ts.date() for ts in pd.to_datetime(close.index)]
+        closes = [float(value) for value in close.to_numpy()]
         return pd.DataFrame({"date": dates, "close": closes})
 
     def _extend_cache(self, _series_id: str, start_date: date, cache_path: Path) -> pd.DataFrame:
@@ -110,8 +93,11 @@ class NasdaqClient:
         """io: Return a PIT TimeSeries for series_id through as_of.
 
         NASDAQXNDX has no vintages; is_pseudo_pit is always False.
-        Fetches from Nasdaq Data Link only when the cache does not cover as_of.
+        Fetches from Yahoo Finance only when the cache does not cover as_of.
         """
+        if series_id.upper() != "NASDAQXNDX":
+            msg = "NasdaqClient only supports NASDAQXNDX"
+            raise ValueError(msg)
         cache_path = self._cache_path(series_id)
         cached = self._load_cached(cache_path)
 
@@ -122,7 +108,9 @@ class NasdaqClient:
             else:
                 start_date = max(cached["date"]) + timedelta(days=1)
             cached = self._extend_cache(series_id, start_date, cache_path)
-        assert cached is not None  # always set above
+        if cached is None:
+            msg = "NASDAQXNDX cache was not initialized after fetch"
+            raise RuntimeError(msg)
 
         pit = cached[cached["date"] <= as_of]
         timestamps = np.asarray(

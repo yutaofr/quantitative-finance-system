@@ -92,7 +92,6 @@ def test_weekly_builds_default_runner_deps_without_storing_secrets_in_config(
     def load_secrets(env: dict[str, str]) -> AdapterSecrets:
         return AdapterSecrets(
             fred_api_key=env["FRED_API_KEY"],
-            nasdaq_dl_api_key="",
             cboe_token="",
         )
 
