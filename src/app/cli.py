@@ -12,13 +12,21 @@ from pathlib import Path
 import sys
 from typing import Any, cast
 
-from app.config_loader import load_frozen_config, production_hash_path, production_output_path
+from app.config_loader import (
+    load_adapter_secrets,
+    load_frozen_config,
+    production_hash_path,
+    production_output_path,
+)
+from app.runtime_deps import build_weekly_runner_deps
 from app.weekly_runner import run_weekly_job
 from config_types import FrozenConfig
 
 LoadConfig = Callable[[dict[str, str], dict[str, object] | None], FrozenConfig]
 RunWeekly = Callable[..., int]
 VerifyArtifact = Callable[..., int]
+LoadSecrets = Callable[[dict[str, str]], object]
+BuildWeeklyRunnerDeps = Callable[..., object]
 
 
 class ExitCode(IntEnum):
@@ -105,9 +113,14 @@ def run(
     if args.command == "weekly":
         load_config = cast(LoadConfig, deps.get("load_config", load_frozen_config))
         run_weekly = cast(RunWeekly, deps.get("run_weekly_job", run_weekly_job))
+        load_secrets = cast(LoadSecrets, deps.get("load_adapter_secrets", load_adapter_secrets))
+        build_deps = cast(
+            BuildWeeklyRunnerDeps,
+            deps.get("build_weekly_runner_deps", build_weekly_runner_deps),
+        )
         weekly_runner_deps = deps.get("weekly_runner_deps")
         if weekly_runner_deps is None:
-            return _not_implemented("weekly")
+            weekly_runner_deps = build_deps(load_secrets(env))
         as_of = _parse_as_of(str(args.as_of))
         cfg = load_config(env, {})
         vintage_mode = "strict" if as_of >= cfg.strict_pit_start else "pseudo"
