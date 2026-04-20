@@ -153,3 +153,73 @@ def test_verify_uses_same_artifact_directory_convention(tmp_path: Path) -> None:
     assert seen["output_path"] == (
         artifacts_root / "weekly" / "as_of=2024-12-27" / "production_output.json"
     )
+
+
+def test_train_dispatches_to_training_runner_with_artifact_root(tmp_path: Path) -> None:
+    seen: dict[str, object] = {}
+
+    def load_config(
+        _env: dict[str, str],
+        _overrides: dict[str, object] | None,
+    ) -> FrozenConfig:
+        return _config()
+
+    def run_train_job(**kwargs: object) -> int:
+        seen.update(kwargs)
+        return int(ExitCode.OK)
+
+    assert run(
+        [
+            "train",
+            "--as-of",
+            "2024-12-27",
+            "--window",
+            "312w",
+            "--artifacts-root",
+            str(tmp_path),
+        ],
+        deps_overrides={
+            "load_config": load_config,
+            "run_train_job": run_train_job,
+            "train_runner_deps": object(),
+        },
+        environ={"TZ": "America/New_York"},
+    ) == int(ExitCode.OK)
+
+    assert seen["vintage_mode"] == "strict"
+    assert seen["training_root"] == tmp_path / "training"
+    assert seen["window_weeks"] == 312
+
+
+def test_backtest_dispatches_to_walkforward_runner_with_jsonl_path(tmp_path: Path) -> None:
+    seen: dict[str, object] = {}
+
+    def load_config(
+        _env: dict[str, str],
+        _overrides: dict[str, object] | None,
+    ) -> FrozenConfig:
+        return _config()
+
+    def run_backtest_job(**kwargs: object) -> int:
+        seen.update(kwargs)
+        return int(ExitCode.OK)
+
+    assert run(
+        [
+            "backtest",
+            "--start",
+            "2024-01-05",
+            "--end",
+            "2024-01-12",
+            "--artifacts-root",
+            str(tmp_path),
+        ],
+        deps_overrides={
+            "load_config": load_config,
+            "run_backtest_job": run_backtest_job,
+            "backtest_runner_deps": object(),
+        },
+        environ={"TZ": "America/New_York"},
+    ) == int(ExitCode.OK)
+
+    assert seen["output_path"] == tmp_path / "backtest" / "backtest_results.jsonl"

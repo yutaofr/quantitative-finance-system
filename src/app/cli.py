@@ -12,13 +12,19 @@ from pathlib import Path
 import sys
 from typing import Any, cast
 
+from app.backtest_runner import run_backtest_job
 from app.config_loader import (
     load_adapter_secrets,
     load_frozen_config,
     production_hash_path,
     production_output_path,
 )
-from app.runtime_deps import build_weekly_runner_deps
+from app.runtime_deps import (
+    build_backtest_runner_deps,
+    build_train_runner_deps,
+    build_weekly_runner_deps,
+)
+from app.train_runner import parse_window_weeks, run_train_job
 from app.weekly_runner import run_weekly_job
 from config_types import FrozenConfig
 
@@ -27,6 +33,10 @@ RunWeekly = Callable[..., int]
 VerifyArtifact = Callable[..., int]
 LoadSecrets = Callable[[dict[str, str]], object]
 BuildWeeklyRunnerDeps = Callable[..., object]
+BuildTrainRunnerDeps = Callable[..., object]
+BuildBacktestRunnerDeps = Callable[..., object]
+RunTrain = Callable[..., int]
+RunBacktest = Callable[..., int]
 
 
 class ExitCode(IntEnum):
@@ -57,6 +67,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     train = subparsers.add_parser("train")
     train.add_argument("--window", required=True)
+    train.add_argument("--as-of", required=False, default="auto")
+    train.add_argument("--artifacts-root", required=False, default="artifacts")
 
     verify = subparsers.add_parser("verify")
     verify.add_argument("--as-of", required=True)
@@ -139,8 +151,49 @@ def run(
         cfg = load_config(env, {})
         output_path = production_output_path(as_of, artifacts_root=Path(args.artifacts_root))
         return verify_artifact(as_of=as_of, output_path=output_path, cfg=cfg)
-    if args.command in {"backtest", "train"}:
-        return _not_implemented(str(args.command))
+    if args.command == "train":
+        load_config = cast(LoadConfig, deps.get("load_config", load_frozen_config))
+        train_job = cast(RunTrain, deps.get("run_train_job", run_train_job))
+        load_secrets = cast(LoadSecrets, deps.get("load_adapter_secrets", load_adapter_secrets))
+        build_deps = cast(
+            BuildTrainRunnerDeps,
+            deps.get("build_train_runner_deps", build_train_runner_deps),
+        )
+        train_runner_deps = deps.get("train_runner_deps")
+        if train_runner_deps is None:
+            train_runner_deps = build_deps(load_secrets(env))
+        as_of = _parse_as_of(str(args.as_of))
+        cfg = load_config(env, {})
+        vintage_mode = "strict" if as_of >= cfg.strict_pit_start else "pseudo"
+        return train_job(
+            as_of=as_of,
+            vintage_mode=vintage_mode,
+            cfg=cfg,
+            training_root=Path(args.artifacts_root) / "training",
+            window_weeks=parse_window_weeks(str(args.window)),
+            deps=train_runner_deps,
+        )
+    if args.command == "backtest":
+        load_config = cast(LoadConfig, deps.get("load_config", load_frozen_config))
+        backtest_job = cast(RunBacktest, deps.get("run_backtest_job", run_backtest_job))
+        load_secrets = cast(LoadSecrets, deps.get("load_adapter_secrets", load_adapter_secrets))
+        build_deps = cast(
+            BuildBacktestRunnerDeps,
+            deps.get("build_backtest_runner_deps", build_backtest_runner_deps),
+        )
+        backtest_runner_deps = deps.get("backtest_runner_deps")
+        if backtest_runner_deps is None:
+            backtest_runner_deps = build_deps(load_secrets(env))
+        start = _parse_as_of(str(args.start))
+        end = _parse_as_of(str(args.end))
+        cfg = load_config(env, {})
+        return backtest_job(
+            start=start,
+            end=end,
+            cfg=cfg,
+            output_path=Path(args.artifacts_root) / "backtest" / "backtest_results.jsonl",
+            deps=backtest_runner_deps,
+        )
     parser.print_help(sys.stderr)
     return int(ExitCode.ENV_ERROR)
 
