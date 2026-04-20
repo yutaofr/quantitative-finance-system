@@ -24,19 +24,25 @@ from engine_types import (
     WeeklyOutput,
     WeeklyState,
 )
+from errors import HMMConvergenceError
 from features.block_builder import build_feature_block
+from features.pca import robust_pca_2d
 from features.scaling import robust_zscore_expanding, soft_squash_clip
 from law.linear_quantiles import QRCoefs, predict_interior
 from law.quantile_moments import moments_from_quantiles
 from law.tail_extrapolation import extrapolate_tails
-from state.ti_hmm_single import HMMModel, degraded_hmm_posterior
+from state.ti_hmm_single import HMMModel, degraded_hmm_posterior, infer_hmm
 
 SRD_VERSION: Literal["8.7"] = "8.7"
 STATE_COUNT = 3
 BLOCKED_OFFENSE = 50.0
 FULL_TAUS = (0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95)
+MISSING_DEGRADED = 0.10
 MISSING_BLOCKED = 0.20
 DEFAULT_PREVIOUS_OFFENSE = 50.0
+FEATURE_COUNT = 10
+HMM_OBS_MIN_ROWS = 2
+FRIDAY = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,9 +157,69 @@ def _require_artifacts(
     return artifacts.utility_zstats, artifacts.offense_thresholds, artifacts.qr_coefs
 
 
-def _scale_current_features(raw: NDArray[np.float64]) -> NDArray[np.float64]:
-    z = robust_zscore_expanding(np.asarray(raw, dtype=np.float64))
-    return soft_squash_clip(z)
+def _scale_feature_history(raw_history: NDArray[np.float64]) -> NDArray[np.float64]:
+    values = np.asarray(raw_history, dtype=np.float64)
+    scaled = np.empty_like(values, dtype=np.float64)
+    for idx in range(values.shape[1]):
+        scaled[:, idx] = soft_squash_clip(robust_zscore_expanding(values[:, idx]))
+    return scaled
+
+
+def _weekly_dates_from_series(series: Mapping[str, TimeSeries], as_of: date) -> tuple[date, ...]:
+    timestamps = series["DGS10"].timestamps.astype("datetime64[D]")
+    filtered = timestamps[timestamps <= np.datetime64(as_of, "D")]
+    return tuple(
+        week
+        for week in (date.fromisoformat(str(value)) for value in filtered.tolist())
+        if week.weekday() == FRIDAY
+    )
+
+
+def _feature_history(
+    series: Mapping[str, TimeSeries],
+    as_of: date,
+) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.bool_]]:
+    rows: list[NDArray[np.float64]] = []
+    masks: list[NDArray[np.bool_]] = []
+    for week in _weekly_dates_from_series(series, as_of):
+        raw, missing = build_feature_block(series, week)
+        rows.append(raw)
+        masks.append(missing)
+    if not rows:
+        return (
+            np.empty((0, FEATURE_COUNT), dtype=np.float64),
+            np.empty((0, FEATURE_COUNT), dtype=np.float64),
+            np.empty((0, FEATURE_COUNT), dtype=np.bool_),
+        )
+    raw_history = np.vstack(rows)
+    missing_history = np.vstack(masks)
+    finite_mask = ~np.any(missing_history, axis=1)
+    finite_history = raw_history[finite_mask]
+    if finite_history.shape[0] == 0:
+        return raw_history, np.empty((0, FEATURE_COUNT), dtype=np.float64), missing_history
+    return raw_history, _scale_feature_history(finite_history), missing_history
+
+
+def _hmm_inputs(
+    x_scaled_history: NDArray[np.float64],
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    if x_scaled_history.shape[0] < HMM_OBS_MIN_ROWS:
+        msg = "not enough finite feature rows for HMM inference"
+        raise HMMConvergenceError(msg)
+    pc = robust_pca_2d(x_scaled_history)
+    delta = pc[1:] - pc[:-1]
+    y_obs = np.column_stack(
+        [
+            pc[1:, 0],
+            pc[1:, 1],
+            delta[:, 0],
+            delta[:, 1],
+            x_scaled_history[1:, 7],
+            x_scaled_history[1:, 8],
+        ],
+    )
+    h = x_scaled_history[1:, 4] + 0.5 * x_scaled_history[1:, 8]
+    return y_obs, h
 
 
 def _distribution_output(full_quantiles: NDArray[np.float64]) -> DistributionOutput:
@@ -192,13 +258,27 @@ def run_weekly(
     if missing_rate > MISSING_BLOCKED:
         return blocked_weekly_output(as_of, vintage_mode=vintage_mode, missing_rate=missing_rate)
 
-    x_scaled = _scale_current_features(raw)
+    _raw_history, x_scaled_history, _missing_history = _feature_history(series, as_of)
+    if x_scaled_history.shape[0] == 0:
+        return blocked_weekly_output(as_of, vintage_mode=vintage_mode, missing_rate=missing_rate)
+    x_scaled = x_scaled_history[-1]
     hmm = degraded_hmm_posterior()
+    dwell_weeks = 0
+    hazard_covariate = 0.0
+    if training_artifacts.hmm_model is not None:
+        try:
+            y_obs, h_history = _hmm_inputs(x_scaled_history)
+            hmm_result = infer_hmm(training_artifacts.hmm_model, y_obs, h_history)
+            hmm = hmm_result.posterior
+            dwell_weeks = hmm_result.dwell_weeks
+            hazard_covariate = hmm_result.hazard_covariate
+        except (HMMConvergenceError, ValueError):
+            hmm = degraded_hmm_posterior()
     post = hmm.post
     interior = predict_interior(qr_coefs, x_scaled, post)
     full_quantiles, tail_status = extrapolate_tails(interior)
     distribution = _distribution_output(full_quantiles)
-    dgs1 = float(series["DGS1"].values[-1])
+    dgs1 = float(raw[2])
     er = excess_return(distribution.mu_hat, dgs1)
     score = utility(
         er,
@@ -216,7 +296,15 @@ def run_weekly(
         training_artifacts.train_distributions,
     )
     mode: Literal["NORMAL", "DEGRADED", "BLOCKED"]
-    mode = "DEGRADED" if hmm.model_status == "DEGRADED" or tail_status == "fallback" else "NORMAL"
+    mode = (
+        "DEGRADED"
+        if (
+            missing_rate >= MISSING_DEGRADED
+            or hmm.model_status == "DEGRADED"
+            or tail_status == "fallback"
+        )
+        else "NORMAL"
+    )
     return WeeklyOutput(
         as_of_date=as_of,
         srd_version=SRD_VERSION,
@@ -225,8 +313,8 @@ def run_weekly(
         state=WeeklyState(
             post=post,
             state_name=hmm.state_name,
-            dwell_weeks=0,
-            hazard_covariate=0.0,
+            dwell_weeks=dwell_weeks,
+            hazard_covariate=hazard_covariate,
         ),
         distribution=distribution,
         decision=DecisionOutput(

@@ -45,11 +45,25 @@ def test_load_training_artifacts_reads_json_arrays(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
+    eye6 = [[1.0 if row == col else 0.0 for col in range(6)] for row in range(6)]
+    (root / "hmm_model.json").write_text(
+        json.dumps(
+            {
+                "transition_coefs": [[0.0, 0.0, 0.0]] * 3,
+                "emission_mean": [[0.0] * 6, [1.0] * 6, [2.0] * 6],
+                "emission_cov": [eye6] * 3,
+                "label_map": {"0": "DEFENSIVE", "1": "NEUTRAL", "2": "OFFENSIVE"},
+                "log_likelihood": -12.5,
+            },
+        ),
+        encoding="utf-8",
+    )
 
     artifacts = load_training_artifacts(root)
 
     assert artifacts.utility_zstats is not None
     assert artifacts.offense_thresholds is not None
     assert artifacts.qr_coefs is not None
+    assert artifacts.hmm_model is not None
     assert artifacts.state_label_map[0] == "DEFENSIVE"
     assert artifacts.train_distributions["x1"].tolist() == [1.0, 2.0]

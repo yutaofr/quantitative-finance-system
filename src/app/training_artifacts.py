@@ -13,6 +13,7 @@ from decision.utility import UtilityZStats
 from engine_types import Stance
 from inference.weekly import TrainingArtifacts
 from law.linear_quantiles import QRCoefs
+from state.ti_hmm_single import HMMModel
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -26,6 +27,7 @@ def load_training_artifacts(root: Path = Path("artifacts/training")) -> Training
     label_raw = _read_json(root / "state_label_map.json")
     distributions_raw = _read_json(root / "train_distributions.json")
     qr_raw = _read_json(root / "qr_coefs.json")
+    hmm_raw = _read_json(root / "hmm_model.json") if (root / "hmm_model.json").exists() else None
     return TrainingArtifacts(
         utility_zstats=UtilityZStats(**zstats_raw),
         offense_thresholds=OffenseThresholds(**thresholds_raw),
@@ -38,5 +40,18 @@ def load_training_artifacts(root: Path = Path("artifacts/training")) -> Training
             b=np.asarray(qr_raw["b"], dtype=np.float64),
             c=np.asarray(qr_raw["c"], dtype=np.float64),
             solver_status=str(qr_raw["solver_status"]),
+        ),
+        hmm_model=(
+            None
+            if hmm_raw is None
+            else HMMModel(
+                transition_coefs=np.asarray(hmm_raw["transition_coefs"], dtype=np.float64),
+                emission_mean=np.asarray(hmm_raw["emission_mean"], dtype=np.float64),
+                emission_cov=np.asarray(hmm_raw["emission_cov"], dtype=np.float64),
+                label_map={
+                    int(key): cast(Stance, value) for key, value in hmm_raw["label_map"].items()
+                },
+                log_likelihood=float(hmm_raw["log_likelihood"]),
+            )
         ),
     )

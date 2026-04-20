@@ -53,6 +53,15 @@ class HMMPosterior:
 
 
 @dataclass(frozen=True, slots=True)
+class HMMInferenceResult:
+    """pure. Filtered HMM posterior plus dwell/hazard diagnostics."""
+
+    posterior: HMMPosterior
+    dwell_weeks: int
+    hazard_covariate: float
+
+
+@dataclass(frozen=True, slots=True)
 class HMMFilterResult:
     """pure. Log-space filtered posterior path and total log-likelihood."""
 
@@ -559,6 +568,42 @@ def _log_transition_matrices(
         transition = transition_matrix_t(transition_coefs, dwell[time_idx], float(h[time_idx]))
         matrices[time_idx] = np.log(transition)
     return matrices
+
+
+def infer_hmm(
+    model: HMMModel,
+    y_obs_history: NDArray[np.float64],
+    h_history: NDArray[np.float64],
+) -> HMMInferenceResult:
+    """pure. Filter current TI-HMM posterior from fitted parameters and observations."""
+    if set(model.label_map) != set(range(STATE_COUNT)):
+        msg = "HMM label_map must contain all hidden states"
+        raise HMMConvergenceError(msg)
+    y_obs = np.asarray(y_obs_history, dtype=np.float64)
+    h = np.asarray(h_history, dtype=np.float64)
+    _validate_fit_inputs(y_obs, h)
+    log_initial = np.log(np.full(STATE_COUNT, 1.0 / float(STATE_COUNT), dtype=np.float64))
+    log_emission = _log_emission_matrix(y_obs, model.emission_mean, model.emission_cov)
+    dwell = np.ones((max(y_obs.shape[0] - 1, 0), STATE_COUNT), dtype=np.float64)
+    log_transition = _log_transition_matrices(model.transition_coefs, dwell, h[: dwell.shape[0]])
+    filtering = log_forward_filter(log_initial, log_transition, log_emission)
+    post = np.exp(filtering.log_alpha[-1])
+    state_idx = int(np.argmax(post))
+    path = np.argmax(filtering.log_alpha, axis=1)
+    dwell_weeks = 1
+    for idx in range(path.shape[0] - 2, -1, -1):
+        if int(path[idx]) != state_idx:
+            break
+        dwell_weeks += 1
+    return HMMInferenceResult(
+        posterior=HMMPosterior(
+            post=post,
+            state_name=model.label_map[state_idx],
+            model_status="ok",
+        ),
+        dwell_weeks=dwell_weeks,
+        hazard_covariate=float(h[-1]),
+    )
 
 
 def _validate_forward_returns(

@@ -11,6 +11,7 @@ from app.output_serializer import write_weekly_output
 from app.training_artifacts import load_training_artifacts
 from app.weekly_runner import WeeklyRunnerDeps
 from config_types import FrozenConfig
+from data_contract.derived_series import derive_rv20_nasdaq100
 from data_contract.fred_adapter import FredClient
 from engine_types import TimeSeries, VintageMode, WeeklyOutput
 from inference.weekly import TrainingArtifacts, run_weekly
@@ -23,10 +24,10 @@ REQUIRED_SERIES = (
     "BAA10Y",
     "WALCL",
     "VXNCLS",
-    "RV20_NDX",
     "VIXCLS",
     "VXVCLS",
 )
+DERIVED_PRICE_SERIES = "NASDAQXNDX"
 
 
 def build_weekly_runner_deps(
@@ -39,10 +40,13 @@ def build_weekly_runner_deps(
     client = FredClient(api_key=secrets.fred_api_key, cache_root=cache_root)
 
     def fetch_series(as_of: date, vintage_mode: VintageMode) -> dict[str, TimeSeries]:
-        return {
+        fetched = {
             series_id: client.get_series(series_id, as_of, vintage_mode)
             for series_id in REQUIRED_SERIES
         }
+        price_series = client.get_series(DERIVED_PRICE_SERIES, as_of, vintage_mode)
+        fetched["RV20_NDX"] = derive_rv20_nasdaq100(price_series, as_of)
+        return fetched
 
     def load_artifacts() -> TrainingArtifacts:
         return load_training_artifacts(training_root)

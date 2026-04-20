@@ -9,6 +9,7 @@ from decision.utility import UtilityZStats
 from engine_types import TimeSeries
 from inference.weekly import TrainingArtifacts, run_weekly
 from law.linear_quantiles import QRCoefs
+from state.ti_hmm_single import HMMModel
 
 
 def _series(series_id: str, start: date, values: list[float]) -> TimeSeries:
@@ -25,25 +26,24 @@ def _series(series_id: str, start: date, values: list[float]) -> TimeSeries:
 
 
 def _series_map(as_of: date) -> dict[str, TimeSeries]:
-    start = as_of - timedelta(weeks=30)
-    base = [10.0 + idx for idx in range(31)]
+    start = as_of - timedelta(weeks=40)
+    base = [10.0 + idx for idx in range(41)]
     return {
         "DGS10": _series("DGS10", start, base),
         "DGS2": _series("DGS2", start, [value - 1.0 for value in base]),
-        "DGS1": _series("DGS1", start, [0.02] * 31),
-        "EFFR": _series("EFFR", start, [0.01 + idx * 0.001 for idx in range(31)]),
-        "BAA10Y": _series("BAA10Y", start, [0.03 + idx * 0.001 for idx in range(31)]),
-        "WALCL": _series("WALCL", start, [100.0 + idx for idx in range(31)]),
-        "VXNCLS": _series("VXNCLS", start, [20.0 + idx * 0.1 for idx in range(31)]),
-        "RV20_NDX": _series("RV20_NDX", start, [10.0 + idx * 0.1 for idx in range(31)]),
-        "VIXCLS": _series("VIXCLS", start, [15.0 + idx * 0.1 for idx in range(31)]),
-        "VXVCLS": _series("VXVCLS", start, [12.0 + idx * 0.1 for idx in range(31)]),
+        "DGS1": _series("DGS1", start, [0.02] * 41),
+        "EFFR": _series("EFFR", start, [0.01 + idx * 0.001 for idx in range(41)]),
+        "BAA10Y": _series("BAA10Y", start, [0.03 + idx * 0.001 for idx in range(41)]),
+        "WALCL": _series("WALCL", start, [100.0 + idx for idx in range(41)]),
+        "VXNCLS": _series("VXNCLS", start, [20.0 + idx * 0.1 for idx in range(41)]),
+        "RV20_NDX": _series("RV20_NDX", start, [10.0 + idx * 0.1 for idx in range(41)]),
+        "VIXCLS": _series("VIXCLS", start, [15.0 + idx * 0.1 for idx in range(41)]),
+        "VXVCLS": _series("VXVCLS", start, [12.0 + idx * 0.1 for idx in range(41)]),
     }
 
 
-def test_run_weekly_assembles_output_from_training_artifacts() -> None:
-    as_of = date(2024, 12, 27)
-    artifacts = TrainingArtifacts(
+def _training_artifacts(*, hmm_model: HMMModel | None = None) -> TrainingArtifacts:
+    return TrainingArtifacts(
         utility_zstats=UtilityZStats(
             er_med=0.0,
             er_mad=1.0,
@@ -65,7 +65,13 @@ def test_run_weekly_assembles_output_from_training_artifacts() -> None:
             c=np.zeros((5, 3), dtype=np.float64),
             solver_status="ok",
         ),
+        hmm_model=hmm_model,
     )
+
+
+def test_run_weekly_assembles_output_from_training_artifacts() -> None:
+    as_of = date(2024, 12, 27)
+    artifacts = _training_artifacts()
 
     output = run_weekly(as_of, "strict", _series_map(as_of), artifacts)
 
@@ -74,3 +80,40 @@ def test_run_weekly_assembles_output_from_training_artifacts() -> None:
     assert output.diagnostics.hmm_status == "degenerate"
     assert output.distribution.q05 <= output.distribution.q10
     assert output.decision.stance in {"DEFENSIVE", "NEUTRAL", "OFFENSIVE"}
+
+
+def test_run_weekly_uses_hmm_model_when_present() -> None:
+    as_of = date(2024, 12, 27)
+    artifacts = _training_artifacts(
+        hmm_model=HMMModel(
+            transition_coefs=np.zeros((3, 3), dtype=np.float64),
+            emission_mean=np.zeros((3, 6), dtype=np.float64),
+            emission_cov=np.stack([np.eye(6, dtype=np.float64)] * 3),
+            label_map={0: "DEFENSIVE", 1: "NEUTRAL", 2: "OFFENSIVE"},
+            log_likelihood=-1.0,
+        ),
+    )
+
+    output = run_weekly(as_of, "strict", _series_map(as_of), artifacts)
+
+    assert output.mode == "NORMAL"
+    assert output.diagnostics.hmm_status == "ok"
+    assert np.isclose(np.sum(output.state.post), 1.0)
+
+
+def test_run_weekly_degrades_invalid_hmm_model() -> None:
+    as_of = date(2024, 12, 27)
+    artifacts = _training_artifacts(
+        hmm_model=HMMModel(
+            transition_coefs=np.zeros((3, 3), dtype=np.float64),
+            emission_mean=np.zeros((3, 6), dtype=np.float64),
+            emission_cov=np.stack([np.eye(6, dtype=np.float64)] * 3),
+            label_map={0: "DEFENSIVE", 1: "NEUTRAL"},
+            log_likelihood=-1.0,
+        ),
+    )
+
+    output = run_weekly(as_of, "strict", _series_map(as_of), artifacts)
+
+    assert output.mode == "DEGRADED"
+    assert output.diagnostics.hmm_status == "degenerate"
