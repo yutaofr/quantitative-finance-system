@@ -26,3 +26,10 @@ def test_frozen_constants_match_srd_v8_7() -> None:
     assert decision["band"] == 7
     assert backtest["block_lengths"] == [52, 78]
     assert backtest["bootstrap_replications"] == 2000
+    assert backtest["coverage_tol"] == 0.03
+    assert backtest["crps_min_improve"] == 0.05
+    assert backtest["ceq_floor"] == -0.005
+    assert backtest["maxdd_tol"] == 0.03
+    assert backtest["turnover_cap"] == 1.5
+    assert backtest["blocked_cap"] == 0.15
+    assert backtest["effective_strict_start"] == "2014-11-28"

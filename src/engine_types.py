@@ -106,7 +106,7 @@ class WeeklyOutput:
     """pure. Frozen weekly production output before shell serialization."""
 
     as_of_date: date
-    srd_version: Literal["8.7"]
+    srd_version: Literal["8.7.1"]
     mode: Mode
     vintage_mode: VintageMode
     state: WeeklyState

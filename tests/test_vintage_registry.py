@@ -6,7 +6,9 @@ import pytest
 
 from data_contract.vintage_registry import (
     FORBIDDEN_IN_PROD,
+    PRODUCTION_FEATURE_SERIES,
     STRICT_PIT_STARTS,
+    compute_effective_strict_start,
     is_forbidden_in_prod,
     validate_strict_pit_available,
 )
@@ -36,6 +38,16 @@ def test_strict_pit_validation_raises_before_earliest_vintage() -> None:
 
 def test_strict_pit_validation_allows_start_date() -> None:
     validate_strict_pit_available("RRPONTSYD", date(2013, 2, 1))
+
+
+def test_compute_effective_strict_start_matches_srd_v8_7_1() -> None:
+    assert compute_effective_strict_start(
+        PRODUCTION_FEATURE_SERIES,
+        STRICT_PIT_STARTS,
+        min_training_weeks=312,
+        embargo_weeks=53,
+        weekly_calendar="Friday",
+    ) == date(2014, 11, 28)
 
 
 def test_forbidden_production_series_match_srd_section_4_2() -> None:

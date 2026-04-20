@@ -15,7 +15,7 @@ def test_health_returns_ok() -> None:
 
 def _config() -> FrozenConfig:
     return FrozenConfig(
-        srd_version="8.7",
+        srd_version="8.7.1",
         random_seed=8675309,
         timezone="America/New_York",
         missing_rate_degraded=0.10,

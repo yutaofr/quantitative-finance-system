@@ -13,7 +13,7 @@ from state.ti_hmm_single import HMMModel
 
 def _config() -> FrozenConfig:
     return FrozenConfig(
-        srd_version="8.7",
+        srd_version="8.7.1",
         random_seed=8675309,
         timezone="America/New_York",
         missing_rate_degraded=0.10,

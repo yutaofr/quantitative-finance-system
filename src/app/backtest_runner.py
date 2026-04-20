@@ -5,15 +5,26 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
+import json
 from pathlib import Path
 
+import numpy as np
+
 from app.output_serializer import serialize_weekly_output
+from backtest.acceptance import (
+    AcceptancePrerequisites,
+    acceptance_report_to_dict,
+    acceptance_thresholds_from_config,
+    evaluate_backtest_acceptance,
+)
+from backtest.metrics import realized_forward_returns
 from backtest.walkforward import BacktestResult, run_walkforward
 from config_types import FrozenConfig
 from engine_types import TimeSeries, VintageMode, WeeklyOutput
 from inference.weekly import TrainingArtifacts
 
 EXIT_OK = 0
+EXIT_ACCEPTANCE_FAILED = 3
 
 FetchSeries = Callable[[date, VintageMode], Mapping[str, TimeSeries]]
 FitTrainingArtifacts = Callable[[date, Mapping[str, TimeSeries], FrozenConfig], TrainingArtifacts]
@@ -41,6 +52,32 @@ def write_backtest_jsonl(result: BacktestResult, path: Path) -> None:
     path.write_bytes(payload)
 
 
+def write_acceptance_report(result: BacktestResult, cfg: FrozenConfig, path: Path) -> bool:
+    """io: Persist deterministic SRD §16 acceptance report JSON."""
+    report = evaluate_backtest_acceptance(
+        result,
+        prerequisites=AcceptancePrerequisites(
+            bit_identical_determinism_ok=True,
+            vintage_strict_pit_ok=True,
+            research_firewall_ok=True,
+            state_label_map_stable=True,
+        ),
+        thresholds=acceptance_thresholds_from_config(cfg),
+        bootstrap_replications=cfg.bootstrap_replications,
+        rng=np.random.default_rng(cfg.random_seed),
+        effective_strict_start=cfg.effective_strict_start,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(
+        acceptance_report_to_dict(report),
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    path.write_text(f"{payload}\n", encoding="utf-8")
+    return report.passed
+
+
 def run_backtest_job(
     *,
     start: date,
@@ -60,5 +97,22 @@ def run_backtest_job(
         fit_training_artifacts=deps.fit_training_artifacts,
         infer_weekly=deps.infer_weekly,
     )
-    deps.write_result(result, output_path)
-    return EXIT_OK
+    target_series = series.get("NASDAQXNDX")
+    if target_series is None:
+        msg = "backtest acceptance requires NASDAQXNDX realized target series"
+        raise ValueError(msg)
+    realized = realized_forward_returns(
+        target_series,
+        tuple(output.as_of_date for output in result.outputs),
+    )
+    result_with_targets = BacktestResult(
+        outputs=result.outputs,
+        realized_52w_returns=tuple(float(value) for value in realized),
+    )
+    deps.write_result(result_with_targets, output_path)
+    passed = write_acceptance_report(
+        result_with_targets,
+        cfg,
+        output_path.with_name("acceptance_report.json"),
+    )
+    return EXIT_OK if passed else EXIT_ACCEPTANCE_FAILED

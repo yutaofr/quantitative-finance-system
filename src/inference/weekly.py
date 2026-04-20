@@ -10,6 +10,7 @@ from typing import Literal
 import numpy as np
 from numpy.typing import NDArray
 
+from config_types import SRD_VERSION
 from decision.cycle_position import cycle_position
 from decision.hysteresis import apply_band
 from decision.offense_abs import OffenseThresholds, offense_raw, stance_from_offense
@@ -33,7 +34,6 @@ from law.quantile_moments import moments_from_quantiles
 from law.tail_extrapolation import extrapolate_tails
 from state.ti_hmm_single import HMMModel, degraded_hmm_posterior, infer_hmm
 
-SRD_VERSION: Literal["8.7"] = "8.7"
 STATE_COUNT = 3
 BLOCKED_OFFENSE = 50.0
 FULL_TAUS = (0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95)

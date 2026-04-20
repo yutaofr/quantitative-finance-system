@@ -94,7 +94,7 @@ SRD_OUTPUT_SCHEMA: dict[str, Any] = {
     "required": list(SCHEMA_ROOT_KEYS),
     "properties": {
         "as_of_date": {"type": "string", "format": "date"},
-        "srd_version": {"const": "8.7"},
+        "srd_version": {"const": "8.7.1"},
         "mode": {"enum": ["NORMAL", "DEGRADED", "BLOCKED"]},
         "vintage_mode": {"enum": ["strict", "pseudo"]},
         "state": {
@@ -152,7 +152,7 @@ SRD_OUTPUT_SCHEMA: dict[str, Any] = {
 EXPECTED_ENGINE_FIELDS = {
     "WeeklyOutput": (
         ("as_of_date", "date"),
-        ("srd_version", "Literal['8.7']"),
+        ("srd_version", "Literal['8.7.1']"),
         ("mode", "Mode"),
         ("vintage_mode", "VintageMode"),
         ("state", "WeeklyState"),
@@ -184,12 +184,12 @@ EXPECTED_ENGINE_FIELDS = {
         ("coverage_q90_trailing_104w", "float"),
     ),
 }
-EXPECTED_WALKFORWARD_SHA256 = "446fb45cdee7bcfe62dc31eb5924ad61dced1811197f770bc8c8da5a6d01d603"
+EXPECTED_WALKFORWARD_SHA256 = "c9f5d2d09541875ca211b6b89e1d9b220db3d64f62d00c6e65edc6cf05f59186"
 
 
 def _config() -> FrozenConfig:
     return FrozenConfig(
-        srd_version="8.7",
+        srd_version="8.7.1",
         random_seed=8675309,
         timezone="America/New_York",
         missing_rate_degraded=0.10,

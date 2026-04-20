@@ -4,9 +4,20 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 
 import numpy as np
 
+from backtest.metrics import (
+    bootstrap_ceq_diff_p05,
+    bootstrap_crps_improvement_p05,
+    ceq_annualized,
+    crps_improvement_ratio,
+    max_drawdown,
+    strict_metric_series,
+)
+from backtest.walkforward import BacktestResult
+from config_types import FrozenConfig
 from engine_types import WeeklyOutput
 
 MIN_TURNOVER_OBSERVATIONS = 2
@@ -48,6 +59,19 @@ class AcceptanceThresholds:
     block_lengths: tuple[int, ...]
 
 
+def acceptance_thresholds_from_config(cfg: FrozenConfig) -> AcceptanceThresholds:
+    """pure. Load frozen SRD §16 acceptance thresholds from runtime config."""
+    return AcceptanceThresholds(
+        coverage_tolerance=cfg.coverage_tol,
+        crps_improvement_min=cfg.crps_min_improve,
+        ceq_floor=cfg.ceq_floor,
+        max_drawdown_tolerance=cfg.maxdd_tol,
+        turnover_cap=cfg.turnover_cap,
+        blocked_cap=cfg.blocked_cap,
+        block_lengths=cfg.block_lengths,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class AcceptanceItem:
     """pure. One named SRD §16 gate result."""
@@ -73,6 +97,30 @@ class AcceptanceReport:
     def by_name(self) -> Mapping[str, AcceptanceItem]:
         """pure. Return report items keyed by stable item name."""
         return {item.name: item for item in self.items}
+
+
+def acceptance_report_to_dict(report: AcceptanceReport) -> dict[str, object]:
+    """pure. Render an acceptance report as deterministic JSON-compatible data."""
+
+    def finite_or_null(value: float) -> float | None:
+        if not np.isfinite(value):
+            return None
+        return value
+
+    return {
+        "passed": report.passed,
+        "items": [
+            {
+                "name": item.name,
+                "passed": item.passed,
+                "observed": {
+                    key: finite_or_null(value) for key, value in sorted(item.observed.items())
+                },
+                "threshold": item.threshold,
+            }
+            for item in report.items
+        ],
+    }
 
 
 def _bool_item(name: str, *, passed: bool, threshold: str) -> AcceptanceItem:
@@ -256,3 +304,74 @@ def evaluate_acceptance(
         ),
     )
     return AcceptanceReport(items=items)
+
+
+def _metric_value_or_fail(value: float) -> float:
+    if not np.isfinite(value):
+        return float("nan")
+    return value
+
+
+def evaluate_backtest_acceptance(  # noqa: PLR0913
+    result: BacktestResult,
+    *,
+    prerequisites: AcceptancePrerequisites,
+    thresholds: AcceptanceThresholds,
+    bootstrap_replications: int,
+    rng: np.random.Generator,
+    effective_strict_start: date,
+) -> AcceptanceReport:
+    """pure. Compute strict-PIT metrics from a walk-forward result and evaluate gates."""
+    if not result.realized_52w_returns:
+        msg = "backtest acceptance requires realized_52w_returns"
+        raise ValueError(msg)
+    series = strict_metric_series(
+        result.outputs,
+        result.realized_52w_returns,
+        effective_strict_start=effective_strict_start,
+    )
+    q10_coverage = float(np.mean(series.q10_hits)) if series.q10_hits.size else float("nan")
+    q90_coverage = float(np.mean(series.q90_hits)) if series.q90_hits.size else float("nan")
+    crps_improvement = crps_improvement_ratio(
+        series.crps_production,
+        series.crps_baseline_a,
+    )
+    crps_bootstrap = {
+        block_length: bootstrap_crps_improvement_p05(
+            series,
+            block_length=block_length,
+            replications=bootstrap_replications,
+            rng=rng,
+        )
+        for block_length in thresholds.block_lengths
+    }
+    production_ceq = ceq_annualized(series.production_returns)
+    baseline_ceq = ceq_annualized(series.baseline_b_returns)
+    ceq_diff = production_ceq - baseline_ceq
+    ceq_bootstrap = {
+        block_length: bootstrap_ceq_diff_p05(
+            series,
+            block_length=block_length,
+            replications=bootstrap_replications,
+            rng=rng,
+        )
+        for block_length in thresholds.block_lengths
+    }
+    max_drawdown_diff = max_drawdown(series.production_returns) - max_drawdown(
+        series.baseline_b_returns,
+    )
+    metrics = AcceptanceMetrics(
+        q10_empirical_coverage=_metric_value_or_fail(q10_coverage),
+        q90_empirical_coverage=_metric_value_or_fail(q90_coverage),
+        crps_improvement=_metric_value_or_fail(crps_improvement),
+        crps_bootstrap_p05_by_block=crps_bootstrap,
+        ceq_diff=_metric_value_or_fail(ceq_diff),
+        ceq_bootstrap_p05_by_block=ceq_bootstrap,
+        max_drawdown_diff=_metric_value_or_fail(max_drawdown_diff),
+    )
+    return evaluate_acceptance(
+        result.outputs,
+        prerequisites=prerequisites,
+        metrics=metrics,
+        thresholds=thresholds,
+    )

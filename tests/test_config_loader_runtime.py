@@ -14,7 +14,7 @@ def test_load_frozen_config_merges_cli_over_env_over_yaml(tmp_path: Path) -> Non
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
     (config_dir / "base.yaml").write_text(
-        'srd_version: "8.7"\nrandom_seed: 8675309\ntimezone: America/New_York\n',
+        'srd_version: "8.7.1"\nrandom_seed: 8675309\ntimezone: America/New_York\n',
         encoding="utf-8",
     )
     (config_dir / "state.yaml").write_text(
@@ -30,7 +30,10 @@ def test_load_frozen_config_merges_cli_over_env_over_yaml(tmp_path: Path) -> Non
         encoding="utf-8",
     )
     (config_dir / "backtest.yaml").write_text(
-        "block_lengths: [52, 78]\nbootstrap_replications: 2000\n",
+        "block_lengths: [52, 78]\nbootstrap_replications: 2000\n"
+        "coverage_tol: 0.03\ncrps_min_improve: 0.05\nceq_floor: -0.005\n"
+        "maxdd_tol: 0.03\nturnover_cap: 1.5\nblocked_cap: 0.15\n"
+        'effective_strict_start: "2014-11-28"\n',
         encoding="utf-8",
     )
     (config_dir / "data.yaml").write_text(
@@ -47,13 +50,14 @@ def test_load_frozen_config_merges_cli_over_env_over_yaml(tmp_path: Path) -> Non
     assert cfg.timezone == "Europe/Paris"
     assert cfg.random_seed == 123
     assert cfg.band == 7.0
+    assert cfg.effective_strict_start.isoformat() == "2014-11-28"
 
 
 def test_load_adapter_secrets_keeps_credentials_out_of_frozen_config(tmp_path: Path) -> None:
     config_dir = tmp_path / "configs"
     config_dir.mkdir()
     (config_dir / "base.yaml").write_text(
-        'srd_version: "8.7"\nrandom_seed: 8675309\ntimezone: America/New_York\n',
+        'srd_version: "8.7.1"\nrandom_seed: 8675309\ntimezone: America/New_York\n',
         encoding="utf-8",
     )
     (config_dir / "state.yaml").write_text(
@@ -69,7 +73,10 @@ def test_load_adapter_secrets_keeps_credentials_out_of_frozen_config(tmp_path: P
         encoding="utf-8",
     )
     (config_dir / "backtest.yaml").write_text(
-        "block_lengths: [52, 78]\nbootstrap_replications: 2000\n",
+        "block_lengths: [52, 78]\nbootstrap_replications: 2000\n"
+        "coverage_tol: 0.03\ncrps_min_improve: 0.05\nceq_floor: -0.005\n"
+        "maxdd_tol: 0.03\nturnover_cap: 1.5\nblocked_cap: 0.15\n"
+        'effective_strict_start: "2014-11-28"\n',
         encoding="utf-8",
     )
     (config_dir / "data.yaml").write_text(

@@ -23,7 +23,7 @@ from inference.weekly import TrainingArtifacts
 
 def _config() -> FrozenConfig:
     return FrozenConfig(
-        srd_version="8.7",
+        srd_version="8.7.1",
         random_seed=8675309,
         timezone="America/New_York",
         missing_rate_degraded=0.10,
@@ -66,7 +66,7 @@ def _series_map() -> dict[str, TimeSeries]:
 def _normal_output(as_of: date) -> WeeklyOutput:
     return WeeklyOutput(
         as_of_date=as_of,
-        srd_version="8.7",
+        srd_version="8.7.1",
         mode="NORMAL",
         vintage_mode="strict",
         state=WeeklyState(

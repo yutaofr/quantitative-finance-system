@@ -3,4 +3,10 @@ block_lengths:
   - 78
 bootstrap_replications: 2000
 coverage_tol: 0.03
+crps_min_improve: 0.05
+ceq_floor: -0.005
+maxdd_tol: 0.03
+turnover_cap: 1.5
+blocked_cap: 0.15
 strict_pit_start: "2012-01-06"
+effective_strict_start: "2014-11-28"

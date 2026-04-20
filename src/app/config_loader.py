@@ -6,15 +6,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, cast
 
 import yaml
 
-from config_types import FrozenConfig
+from config_types import SRD_VERSION, FrozenConfig
 
 DEFAULT_CONFIG_DIR = Path("configs")
 DEFAULT_ARTIFACTS_ROOT = Path("artifacts")
-SRD_VERSION: Literal["8.7"] = "8.7"
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,11 +45,15 @@ def _merge_runtime_values(  # noqa: PLR0913
     strict_pit_start = date.fromisoformat(
         str(overrides.get("strict_pit_start", data["vintage_modes"]["strict_start"])),
     )
+    effective_strict_start = date.fromisoformat(
+        str(overrides.get("effective_strict_start", backtest["effective_strict_start"])),
+    )
     return FrozenConfig(
         srd_version=SRD_VERSION,
         random_seed=random_seed,
         timezone=timezone,
         strict_pit_start=strict_pit_start,
+        effective_strict_start=effective_strict_start,
         missing_rate_degraded=float(state["missing_rate_degraded"]),
         missing_rate_blocked=float(state["missing_rate_blocked"]),
         quantile_gap=float(law["quantile_gap"]),
@@ -63,6 +66,12 @@ def _merge_runtime_values(  # noqa: PLR0913
         score_max=float(decision["score_max"]),
         block_lengths=tuple(int(value) for value in backtest["block_lengths"]),
         bootstrap_replications=int(backtest["bootstrap_replications"]),
+        coverage_tol=float(backtest["coverage_tol"]),
+        crps_min_improve=float(backtest["crps_min_improve"]),
+        ceq_floor=float(backtest["ceq_floor"]),
+        maxdd_tol=float(backtest["maxdd_tol"]),
+        turnover_cap=float(backtest["turnover_cap"]),
+        blocked_cap=float(backtest["blocked_cap"]),
     )
 
 

@@ -18,7 +18,7 @@ from engine_types import (
 def _sample_output() -> WeeklyOutput:
     return WeeklyOutput(
         as_of_date=date(2024, 12, 27),
-        srd_version="8.7",
+        srd_version="8.7.1",
         mode="NORMAL",
         vintage_mode="strict",
         state=WeeklyState(

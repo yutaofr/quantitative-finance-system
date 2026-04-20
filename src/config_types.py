@@ -6,12 +6,14 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Literal
 
+SRD_VERSION: Literal["8.7.1"] = "8.7.1"
+
 
 @dataclass(frozen=True, slots=True)
 class FrozenConfig:
     """pure. Frozen runtime config assembled by the app shell."""
 
-    srd_version: Literal["8.7"]
+    srd_version: Literal["8.7.1"]
     random_seed: int
     timezone: str
     missing_rate_degraded: float
@@ -27,3 +29,10 @@ class FrozenConfig:
     block_lengths: tuple[int, ...]
     bootstrap_replications: int
     strict_pit_start: date = date(2012, 1, 6)
+    coverage_tol: float = 0.03
+    crps_min_improve: float = 0.05
+    ceq_floor: float = -0.005
+    maxdd_tol: float = 0.03
+    turnover_cap: float = 1.5
+    blocked_cap: float = 0.15
+    effective_strict_start: date = date(2014, 11, 28)

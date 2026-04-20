@@ -18,7 +18,7 @@ def run(argv: Sequence[str] | None = None) -> int:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "as_of": args.as_of,
-        "srd_version": "8.7",
+        "srd_version": "8.7.1",
         "status": "not_implemented",
     }
     output_path.write_bytes(orjson.dumps(payload, option=orjson.OPT_SORT_KEYS))

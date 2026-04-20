@@ -27,6 +27,7 @@ class BacktestResult:
     """pure. Ordered walk-forward weekly outputs."""
 
     outputs: tuple[WeeklyOutput, ...]
+    realized_52w_returns: tuple[float, ...] = ()
 
 
 def _truncate_series(series: TimeSeries, as_of: date) -> TimeSeries:
