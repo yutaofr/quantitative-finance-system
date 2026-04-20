@@ -19,6 +19,8 @@ MATRIX_NDIM = 2
 DEFAULT_L2_ALPHA = 2.0
 DEFAULT_MIN_GAP = 1.0e-4
 OPTIMAL_STATUSES = {"optimal", "optimal_inaccurate"}
+SRD_OK_STATUS = "ok"
+SRD_REARRANGED_STATUS = "rearranged"
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +102,7 @@ def fit_linear_quantiles(  # noqa: PLR0913
         a=np.asarray(a.value, dtype=np.float64),
         b=np.asarray(b.value, dtype=np.float64),
         c=np.asarray(c.value, dtype=np.float64),
-        solver_status=problem.status,
+        solver_status=SRD_OK_STATUS,
     )
 
 
@@ -119,6 +121,18 @@ def predict_interior(
     min_gap: float = DEFAULT_MIN_GAP,
 ) -> NDArray[np.float64]:
     """pure. Predict and rearrange interior quantiles to preserve ordering."""
+    predictions, _status = predict_interior_with_status(coefs, x_t, pi_t, min_gap=min_gap)
+    return predictions
+
+
+def predict_interior_with_status(
+    coefs: QRCoefs,
+    x_t: NDArray[np.float64],
+    pi_t: NDArray[np.float64],
+    *,
+    min_gap: float = DEFAULT_MIN_GAP,
+) -> tuple[NDArray[np.float64], str]:
+    """pure. Predict interior quantiles and expose the SRD §11 solver status."""
     x = np.asarray(x_t, dtype=np.float64)
     post = np.asarray(pi_t, dtype=np.float64)
     if coefs.a.shape != (QUANTILE_COUNT,):
@@ -132,5 +146,5 @@ def predict_interior(
         raise ValueError(msg)
     raw = coefs.a + coefs.b @ x + coefs.c @ post
     if np.all(np.diff(raw) >= min_gap):
-        return raw
-    return _rearrange(raw, min_gap)
+        return raw, coefs.solver_status
+    return _rearrange(raw, min_gap), SRD_REARRANGED_STATUS

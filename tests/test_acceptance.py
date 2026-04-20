@@ -12,6 +12,12 @@ import numpy as np
 import pytest
 
 from app.output_serializer import serialize_weekly_output, to_serializable_dict
+from backtest.acceptance import (
+    AcceptanceMetrics,
+    AcceptancePrerequisites,
+    AcceptanceThresholds,
+    evaluate_acceptance,
+)
 from backtest.walkforward import run_walkforward
 from config_types import FrozenConfig
 from decision.offense_abs import OffenseThresholds
@@ -23,47 +29,47 @@ from state.ti_hmm_single import HMMModel
 
 SCHEMA_ROOT_KEYS = (
     "as_of_date",
+    "srd_version",
+    "mode",
+    "vintage_mode",
+    "state",
+    "distribution",
     "decision",
     "diagnostics",
-    "distribution",
-    "mode",
-    "srd_version",
-    "state",
-    "vintage_mode",
 )
-STATE_KEYS = ("dwell_weeks", "hazard_covariate", "post", "state_name")
+STATE_KEYS = ("post", "state_name", "dwell_weeks", "hazard_covariate")
 DISTRIBUTION_KEYS = (
-    "es20",
-    "mu_hat",
-    "p_loss",
     "q05",
-    "q05_ci_high",
-    "q05_ci_low",
     "q10",
     "q25",
     "q50",
     "q75",
     "q90",
     "q95",
-    "q95_ci_high",
+    "q05_ci_low",
+    "q05_ci_high",
     "q95_ci_low",
+    "q95_ci_high",
+    "mu_hat",
     "sigma_hat",
+    "p_loss",
+    "es20",
 )
 DECISION_KEYS = (
-    "cycle_position",
     "excess_return",
-    "offense_final",
-    "offense_raw",
-    "stance",
     "utility",
+    "offense_raw",
+    "offense_final",
+    "stance",
+    "cycle_position",
 )
 DIAGNOSTICS_KEYS = (
-    "coverage_q10_trailing_104w",
-    "coverage_q90_trailing_104w",
-    "hmm_status",
     "missing_rate",
     "quantile_solver_status",
     "tail_extrapolation_status",
+    "hmm_status",
+    "coverage_q10_trailing_104w",
+    "coverage_q90_trailing_104w",
 )
 ENGINE_DISTRIBUTION_FIELDS = (
     "q05",
@@ -133,7 +139,7 @@ SRD_OUTPUT_SCHEMA: dict[str, Any] = {
             "properties": {
                 "missing_rate": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "quantile_solver_status": {
-                    "enum": ["ok", "optimal", "optimal_inaccurate", "rearranged", "failed"],
+                    "enum": ["ok", "rearranged", "failed"],
                 },
                 "tail_extrapolation_status": {"enum": ["ok", "fallback"]},
                 "hmm_status": {"enum": ["ok", "degenerate", "em_nonconverge"]},
@@ -198,6 +204,18 @@ def _config() -> FrozenConfig:
         score_max=100.0,
         block_lengths=(52, 78),
         bootstrap_replications=2000,
+    )
+
+
+def _acceptance_thresholds() -> AcceptanceThresholds:
+    return AcceptanceThresholds(
+        coverage_tolerance=0.03,
+        crps_improvement_min=0.05,
+        ceq_floor=-0.005,
+        max_drawdown_tolerance=0.03,
+        turnover_cap=1.5,
+        blocked_cap=0.15,
+        block_lengths=(52, 78),
     )
 
 
@@ -355,6 +373,20 @@ def _walkforward_bytes(series: Mapping[str, TimeSeries], start: date, end: date)
     return b"".join(serialize_weekly_output(output) for output in result.outputs)
 
 
+def _acceptance_outputs() -> tuple[WeeklyOutput, ...]:
+    start = date(2024, 1, 5)
+    series = _mock_series(date(2023, 2, 3), weeks=100)
+    result = run_walkforward(
+        start=start,
+        end=start + timedelta(weeks=5),
+        series=series,
+        cfg=_config(),
+        fit_training_artifacts=_fit_training_artifacts,
+        infer_weekly=_infer_weekly,
+    )
+    return result.outputs
+
+
 @pytest.mark.acceptance
 def test_srd_output_schema_matches_engine_types_and_serializer() -> None:
     fields = _engine_dataclass_fields()
@@ -377,7 +409,7 @@ def test_srd_output_schema_matches_engine_types_and_serializer() -> None:
 
 
 @pytest.mark.acceptance
-def test_mock_walkforward_emits_byte_stable_json() -> None:
+def test_determinism_smoke_mock_walkforward_emits_byte_stable_json() -> None:
     start = date(2024, 1, 5)
     end = start + timedelta(weeks=5)
     payload = _walkforward_bytes(_mock_series(date(2023, 2, 3), weeks=100), start, end)
@@ -385,6 +417,45 @@ def test_mock_walkforward_emits_byte_stable_json() -> None:
     assert hashlib.sha256(payload).hexdigest() == EXPECTED_WALKFORWARD_SHA256
     assert b"NaN" not in payload
     assert b"Infinity" not in payload
+
+
+@pytest.mark.acceptance
+def test_acceptance_report_maps_srd_section_16_items() -> None:
+    report = evaluate_acceptance(
+        _acceptance_outputs(),
+        prerequisites=AcceptancePrerequisites(
+            bit_identical_determinism_ok=True,
+            vintage_strict_pit_ok=True,
+            research_firewall_ok=True,
+            state_label_map_stable=True,
+        ),
+        metrics=AcceptanceMetrics(
+            q10_empirical_coverage=0.10,
+            q90_empirical_coverage=0.90,
+            crps_improvement=0.06,
+            crps_bootstrap_p05_by_block={52: 0.01, 78: 0.02},
+            ceq_diff=0.0,
+            ceq_bootstrap_p05_by_block={52: -0.004, 78: -0.003},
+            max_drawdown_diff=0.02,
+        ),
+        thresholds=_acceptance_thresholds(),
+    )
+
+    assert [item.name for item in report.items] == [
+        "bit_identical_determinism",
+        "vintage_strict_pit",
+        "research_firewall",
+        "state_label_map_stability",
+        "quantile_non_crossing",
+        "tail_extrapolation_safety",
+        "interior_coverage",
+        "crps_vs_baseline_a",
+        "ceq_vs_baseline_b",
+        "max_drawdown_vs_baseline_b",
+        "turnover_and_blocked_proportion",
+    ]
+    assert report.passed
+    assert report.by_name["turnover_and_blocked_proportion"].observed["blocked_proportion"] == 0.0
 
 
 @pytest.mark.acceptance

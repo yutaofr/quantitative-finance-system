@@ -9,6 +9,7 @@ from law.linear_quantiles import (
     QRCoefs,
     fit_linear_quantiles,
     predict_interior,
+    predict_interior_with_status,
 )
 
 
@@ -47,7 +48,7 @@ def test_fit_linear_quantiles_joint_solution_predicts_non_crossing_training_rows
     assert coefs.a.shape == (5,)
     assert coefs.b.shape == (5, 2)
     assert coefs.c.shape == (5, 3)
-    assert coefs.solver_status == "optimal"
+    assert coefs.solver_status == "ok"
     for row, post in zip(x_scaled, pi, strict=True):
         preds = predict_interior(coefs, row, post)
         assert np.all(np.diff(preds) >= 1.0e-4 - 1.0e-8)
@@ -64,6 +65,23 @@ def test_predict_interior_rearranges_pathological_coefficients() -> None:
     preds = predict_interior(coefs, np.zeros(2, dtype=np.float64), np.array([0.2, 0.3, 0.5]))
 
     assert np.all(np.diff(preds) >= 1.0e-4 - 1.0e-12)
+
+
+def test_predict_interior_reports_rearranged_status_for_fallback() -> None:
+    coefs = QRCoefs(
+        a=np.array([0.5, 0.4, 0.3, 0.2, 0.1], dtype=np.float64),
+        b=np.zeros((5, 2), dtype=np.float64),
+        c=np.zeros((5, 3), dtype=np.float64),
+        solver_status="ok",
+    )
+
+    _preds, status = predict_interior_with_status(
+        coefs,
+        np.zeros(2, dtype=np.float64),
+        np.array([0.2, 0.3, 0.5], dtype=np.float64),
+    )
+
+    assert status == "rearranged"
 
 
 def test_fit_linear_quantiles_rejects_solver_failure_status() -> None:

@@ -28,7 +28,7 @@ from errors import HMMConvergenceError
 from features.block_builder import build_feature_block
 from features.pca import robust_pca_2d
 from features.scaling import robust_zscore_expanding, soft_squash_clip
-from law.linear_quantiles import QRCoefs, predict_interior
+from law.linear_quantiles import QRCoefs, predict_interior_with_status
 from law.quantile_moments import moments_from_quantiles
 from law.tail_extrapolation import extrapolate_tails
 from state.ti_hmm_single import HMMModel, degraded_hmm_posterior, infer_hmm
@@ -275,7 +275,7 @@ def run_weekly(
         except (HMMConvergenceError, ValueError):
             hmm = degraded_hmm_posterior()
     post = hmm.post
-    interior = predict_interior(qr_coefs, x_scaled, post)
+    interior, quantile_solver_status = predict_interior_with_status(qr_coefs, x_scaled, post)
     full_quantiles, tail_status = extrapolate_tails(interior)
     distribution = _distribution_output(full_quantiles)
     dgs1 = float(raw[2])
@@ -327,7 +327,7 @@ def run_weekly(
         ),
         diagnostics=DiagnosticsOutput(
             missing_rate=missing_rate,
-            quantile_solver_status=qr_coefs.solver_status,
+            quantile_solver_status=quantile_solver_status,
             tail_extrapolation_status=tail_status,
             hmm_status="degenerate" if hmm.model_status == "DEGRADED" else "ok",
             coverage_q10_trailing_104w=0.0,

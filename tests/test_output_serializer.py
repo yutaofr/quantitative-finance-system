@@ -68,13 +68,22 @@ def test_to_serializable_dict_matches_srd_output_contract() -> None:
 
     assert tuple(payload) == (
         "as_of_date",
+        "srd_version",
+        "mode",
+        "vintage_mode",
+        "state",
+        "distribution",
         "decision",
         "diagnostics",
-        "distribution",
-        "mode",
-        "srd_version",
-        "state",
-        "vintage_mode",
+    )
+    assert tuple(payload["state"]) == ("post", "state_name", "dwell_weeks", "hazard_covariate")
+    assert tuple(payload["decision"]) == (
+        "excess_return",
+        "utility",
+        "offense_raw",
+        "offense_final",
+        "stance",
+        "cycle_position",
     )
     assert payload["state"]["post"] == [0.25, 0.5, 0.25]
     assert payload["decision"]["stance"] == "NEUTRAL"
