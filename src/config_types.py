@@ -35,4 +35,3 @@ class FrozenConfig:
     maxdd_tol: float = 0.03
     turnover_cap: float = 1.5
     blocked_cap: float = 0.15
-    effective_strict_start: date = date(2014, 11, 28)
