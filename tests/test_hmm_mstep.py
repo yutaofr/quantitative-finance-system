@@ -56,6 +56,31 @@ def test_update_emission_parameters_raises_when_state_has_no_usable_weight() -> 
         update_emission_parameters(y_obs, gamma, np.ones(3, dtype=np.bool_))
 
 
+def test_update_emission_parameters_ignores_underflow_from_tiny_state_weights() -> None:
+    y_obs = np.array(
+        [
+            [1.0e-200, 2.0e-200],
+            [2.0e-200, 3.0e-200],
+            [3.0e-200, 4.0e-200],
+        ],
+        dtype=np.float64,
+    )
+    gamma = np.array(
+        [
+            [1.0e-200, 0.5, 0.5],
+            [1.0e-200, 0.5, 0.5],
+            [1.0e-200, 0.5, 0.5],
+        ],
+        dtype=np.float64,
+    )
+
+    means, covs = update_emission_parameters(y_obs, gamma, np.ones(3, dtype=np.bool_))
+
+    assert means.shape == (3, 2)
+    assert covs.shape == (3, 2, 2)
+    assert np.isfinite(means[1:]).all()
+
+
 def test_fit_transition_coefs_prefers_staying_when_xi_stays() -> None:
     xi = np.zeros((8, 3, 3), dtype=np.float64)
     for time_idx in range(xi.shape[0]):

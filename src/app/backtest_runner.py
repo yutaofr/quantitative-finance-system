@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date
 import json
@@ -19,7 +20,12 @@ from backtest.acceptance import (
     evaluate_backtest_acceptance,
 )
 from backtest.metrics import realized_forward_returns
-from backtest.walkforward import BacktestResult, run_walkforward
+from backtest.walkforward import (
+    BacktestResult,
+    _slice_series_history,
+    _weekly_dates,
+    run_walkforward,
+)
 from config_types import FrozenConfig
 from engine_types import TimeSeries, VintageMode, WeeklyOutput
 from features.block_builder import build_feature_block
@@ -52,6 +58,7 @@ class BacktestRunnerDeps:
     fit_training_artifacts: FitTrainingArtifacts
     infer_weekly: InferWeekly
     write_result: WriteBacktestResult
+    max_workers: int = 1
 
 
 def write_backtest_jsonl(result: BacktestResult, path: Path) -> None:
@@ -92,6 +99,40 @@ def write_acceptance_report(
     return report.passed
 
 
+def _run_walkforward_parallel(  # noqa: PLR0913
+    start: date,
+    end: date,
+    series: Mapping[str, TimeSeries],
+    cfg: FrozenConfig,
+    *,
+    fit_training_artifacts: FitTrainingArtifacts,
+    infer_weekly: InferWeekly,
+    feature_cache: Mapping[date, Any] | None,
+    max_workers: int,
+) -> BacktestResult:
+    weeks = _weekly_dates(start, end)
+    if max_workers <= 1 or len(weeks) <= 1:
+        return run_walkforward(
+            start,
+            end,
+            series,
+            cfg,
+            fit_training_artifacts=fit_training_artifacts,
+            infer_weekly=infer_weekly,
+            feature_cache=feature_cache,
+        )
+
+    def run_one_week(as_of: date) -> WeeklyOutput:
+        history = _slice_series_history(series, as_of)
+        training_artifacts = fit_training_artifacts(as_of, history, cfg, feature_cache)
+        return infer_weekly(as_of, cfg, history, training_artifacts, feature_cache)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_by_week = {week: executor.submit(run_one_week, week) for week in weeks}
+        outputs = tuple(future_by_week[week].result() for week in weeks)
+    return BacktestResult(outputs=outputs)
+
+
 def run_backtest_job(
     *,
     start: date,
@@ -105,15 +146,35 @@ def run_backtest_job(
     series = deps.fetch_series(end, vintage_mode)
     all_weeks = _weekly_dates_from_series(series, end)
     feature_cache = {week: build_feature_block(series, week) for week in all_weeks}
-    result = run_walkforward(
-        start,
-        end,
-        series,
-        cfg,
-        fit_training_artifacts=deps.fit_training_artifacts,
-        infer_weekly=deps.infer_weekly,
-        feature_cache=feature_cache,
-    )
+    effective_start = cfg.strict_pit_start
+    if vintage_mode == "strict":
+        effective_start = compute_effective_strict_acceptance_start_from_series(
+            series,
+            strict_mode_start=cfg.strict_pit_start,
+            feature_cache=feature_cache,
+        )
+    run_start = max(start, effective_start) if vintage_mode == "strict" else start
+    if deps.max_workers > 1:
+        result = _run_walkforward_parallel(
+            run_start,
+            end,
+            series,
+            cfg,
+            fit_training_artifacts=deps.fit_training_artifacts,
+            infer_weekly=deps.infer_weekly,
+            feature_cache=feature_cache,
+            max_workers=deps.max_workers,
+        )
+    else:
+        result = run_walkforward(
+            run_start,
+            end,
+            series,
+            cfg,
+            fit_training_artifacts=deps.fit_training_artifacts,
+            infer_weekly=deps.infer_weekly,
+            feature_cache=feature_cache,
+        )
     target_series = series.get("NASDAQXNDX")
     if target_series is None:
         msg = "backtest acceptance requires NASDAQXNDX realized target series"
@@ -127,11 +188,6 @@ def run_backtest_job(
         realized_52w_returns=tuple(float(value) for value in realized),
     )
     deps.write_result(result_with_targets, output_path)
-    effective_start = compute_effective_strict_acceptance_start_from_series(
-        series,
-        strict_mode_start=cfg.strict_pit_start,
-        feature_cache=feature_cache,
-    )
     passed = write_acceptance_report(
         result_with_targets,
         cfg,

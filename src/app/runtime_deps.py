@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date
+import os
 from pathlib import Path
 from typing import Any
 
@@ -175,4 +176,5 @@ def build_backtest_runner_deps(
         fit_training_artifacts=fit_training_artifacts,
         infer_weekly=infer,
         write_result=write_result,
+        max_workers=max(1, min(os.cpu_count() or 1, 4)),
     )

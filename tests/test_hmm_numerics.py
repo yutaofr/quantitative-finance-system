@@ -50,6 +50,23 @@ def test_shrink_emission_covariance_adds_diagonal_regularization() -> None:
     np.linalg.cholesky(cov)
 
 
+def test_shrink_emission_covariance_ignores_underflow_from_tiny_weights() -> None:
+    observations = np.array(
+        [
+            [1.0e-200, 2.0e-200],
+            [2.0e-200, 3.0e-200],
+            [3.0e-200, 4.0e-200],
+        ],
+        dtype=np.float64,
+    )
+    weights = np.array([1.0e-200, 2.0e-200, 3.0e-200], dtype=np.float64)
+
+    cov = shrink_emission_covariance(observations, weights)
+
+    assert cov.shape == (2, 2)
+    assert np.isfinite(cov).all()
+
+
 def test_gaussian_log_likelihood_uses_cholesky_and_rejects_singular_covariance() -> None:
     observations = np.array([[0.0, 0.0], [1.0, 1.0]], dtype=np.float64)
     mean = np.array([0.0, 0.0], dtype=np.float64)

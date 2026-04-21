@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from datetime import date, timedelta
 import json
 from pathlib import Path
+import time
 from typing import Any
 
 import numpy as np
@@ -178,3 +179,168 @@ def test_run_backtest_job_writes_acceptance_report_next_to_results(
     assert code in {0, 3}
     assert output_path.exists()
     assert report["items"][0]["name"] == "bit_identical_determinism"
+
+
+def test_run_backtest_job_clips_start_to_effective_strict_week(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen_as_of: list[date] = []
+
+    def fetch_series(_as_of: date, _vintage_mode: str) -> Mapping[str, TimeSeries]:
+        start = date(2024, 1, 5)
+        timestamps = np.array(
+            [(start + timedelta(weeks=idx)).isoformat() for idx in range(10)],
+            dtype="datetime64[D]",
+        )
+        return {
+            "NASDAQXNDX": TimeSeries(
+                series_id="NASDAQXNDX",
+                timestamps=timestamps,
+                values=np.ones(10, dtype=np.float64),
+                is_pseudo_pit=False,
+            ),
+            "DGS10": TimeSeries(
+                series_id="DGS10",
+                timestamps=timestamps,
+                values=np.ones(10, dtype=np.float64),
+                is_pseudo_pit=False,
+            ),
+        }
+
+    def fit_training_artifacts(
+        _as_of: date,
+        _series: Mapping[str, TimeSeries],
+        _cfg: FrozenConfig,
+        _feature_cache: Any = None,
+    ) -> TrainingArtifacts:
+        return TrainingArtifacts(
+            utility_zstats=None,
+            offense_thresholds=None,
+            train_distributions={},
+            state_label_map={0: "DEFENSIVE", 1: "NEUTRAL", 2: "OFFENSIVE"},
+        )
+
+    def infer_weekly(
+        as_of: date,
+        _cfg: FrozenConfig,
+        _series: Mapping[str, TimeSeries],
+        _training_artifacts: TrainingArtifacts,
+        _feature_cache: Any = None,
+    ) -> WeeklyOutput:
+        seen_as_of.append(as_of)
+        return _output(as_of)
+
+    monkeypatch.setattr(
+        "app.backtest_runner.compute_effective_strict_acceptance_start_from_series",
+        lambda *_args, **_kwargs: date(2024, 1, 19),
+    )
+    monkeypatch.setattr(
+        "app.backtest_runner.build_feature_block",
+        lambda _series, _week: (
+            np.zeros(10, dtype=np.float64),
+            np.zeros(10, dtype=np.bool_),
+        ),
+    )
+
+    code = run_backtest_job(
+        start=date(2024, 1, 5),
+        end=date(2024, 1, 26),
+        cfg=_config(),
+        output_path=tmp_path / "backtest" / "backtest_results.jsonl",
+        deps=BacktestRunnerDeps(
+            fetch_series=fetch_series,
+            fit_training_artifacts=fit_training_artifacts,
+            infer_weekly=infer_weekly,
+            write_result=write_backtest_jsonl,
+        ),
+    )
+
+    assert code in {0, 3}
+    assert seen_as_of == [date(2024, 1, 19), date(2024, 1, 26)]
+
+
+def test_run_backtest_job_preserves_output_order_with_parallel_workers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fetch_series(_as_of: date, _vintage_mode: str) -> Mapping[str, TimeSeries]:
+        start = date(2024, 1, 5)
+        timestamps = np.array(
+            [(start + timedelta(weeks=idx)).isoformat() for idx in range(8)],
+            dtype="datetime64[D]",
+        )
+        return {
+            "NASDAQXNDX": TimeSeries(
+                series_id="NASDAQXNDX",
+                timestamps=timestamps,
+                values=np.ones(8, dtype=np.float64),
+                is_pseudo_pit=False,
+            ),
+            "DGS10": TimeSeries(
+                series_id="DGS10",
+                timestamps=timestamps,
+                values=np.ones(8, dtype=np.float64),
+                is_pseudo_pit=False,
+            ),
+        }
+
+    def fit_training_artifacts(
+        _as_of: date,
+        _series: Mapping[str, TimeSeries],
+        _cfg: FrozenConfig,
+        _feature_cache: Any = None,
+    ) -> TrainingArtifacts:
+        return TrainingArtifacts(
+            utility_zstats=None,
+            offense_thresholds=None,
+            train_distributions={},
+            state_label_map={0: "DEFENSIVE", 1: "NEUTRAL", 2: "OFFENSIVE"},
+        )
+
+    def infer_weekly(
+        as_of: date,
+        _cfg: FrozenConfig,
+        _series: Mapping[str, TimeSeries],
+        _training_artifacts: TrainingArtifacts,
+        _feature_cache: Any = None,
+    ) -> WeeklyOutput:
+        if as_of == date(2024, 1, 12):
+            time.sleep(0.02)
+        return _output(as_of)
+
+    monkeypatch.setattr(
+        "app.backtest_runner.compute_effective_strict_acceptance_start_from_series",
+        lambda *_args, **_kwargs: date(2024, 1, 5),
+    )
+    monkeypatch.setattr(
+        "app.backtest_runner.build_feature_block",
+        lambda _series, _week: (
+            np.zeros(10, dtype=np.float64),
+            np.zeros(10, dtype=np.bool_),
+        ),
+    )
+
+    output_path = tmp_path / "backtest" / "backtest_results.jsonl"
+    code = run_backtest_job(
+        start=date(2024, 1, 5),
+        end=date(2024, 1, 19),
+        cfg=_config(),
+        output_path=output_path,
+        deps=BacktestRunnerDeps(
+            fetch_series=fetch_series,
+            fit_training_artifacts=fit_training_artifacts,
+            infer_weekly=infer_weekly,
+            write_result=write_backtest_jsonl,
+            max_workers=2,
+        ),
+    )
+
+    lines = output_path.read_text(encoding="utf-8").splitlines()
+    payloads = [json.loads(line) for line in lines]
+    assert code in {0, 3}
+    assert [payload["as_of_date"] for payload in payloads] == [
+        "2024-01-05",
+        "2024-01-12",
+        "2024-01-19",
+    ]

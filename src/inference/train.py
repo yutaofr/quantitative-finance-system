@@ -72,10 +72,10 @@ def _index_in_week(series: TimeSeries, as_of: date) -> int | None:
     target = np.datetime64(as_of, "D")
     week_start = np.datetime64(as_of - timedelta(days=6), "D")
     timestamps = series.timestamps.astype("datetime64[D]")
-    matches = np.flatnonzero((timestamps >= week_start) & (timestamps <= target))
-    if matches.size == 0:
+    last_idx = int(np.searchsorted(timestamps, target, side="right")) - 1
+    if last_idx < 0 or timestamps[last_idx] < week_start:
         return None
-    return int(matches[-1])
+    return last_idx
 
 
 def _value_in_week(series: TimeSeries, as_of: date) -> float:

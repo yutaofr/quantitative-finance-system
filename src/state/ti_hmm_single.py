@@ -245,9 +245,11 @@ def shrink_emission_covariance(
         msg = "weights must have positive total mass"
         raise HMMConvergenceError(msg)
 
-    mean = np.sum(obs * w[:, None], axis=0) / weight_sum
+    with np.errstate(under="ignore"):
+        mean = np.sum(obs * w[:, None], axis=0) / weight_sum
     centered = obs - mean
-    sample_cov = (centered * w[:, None]).T @ centered / weight_sum
+    with np.errstate(under="ignore"):
+        sample_cov = (centered * w[:, None]).T @ centered / weight_sum
     target = np.diag(np.diag(sample_cov))
     diff = sample_cov - target
     shrink_den = float(np.sum(diff * diff))
@@ -256,7 +258,8 @@ def shrink_emission_covariance(
     else:
         outer = np.einsum("ni,nj->nij", centered, centered)
         noise = outer - sample_cov
-        shrink_num = float(np.sum((noise * w[:, None, None]) ** 2)) / (weight_sum * weight_sum)
+        with np.errstate(under="ignore"):
+            shrink_num = float(np.sum((noise * w[:, None, None]) ** 2)) / (weight_sum * weight_sum)
         shrinkage = float(np.clip(shrink_num / shrink_den, 0.0, 1.0))
         shrunk = (1.0 - shrinkage) * sample_cov + shrinkage * target
     return shrunk + epsilon * np.eye(obs.shape[1], dtype=np.float64)
@@ -442,7 +445,9 @@ def update_emission_parameters(
         if weight_sum <= 0.0:
             msg = "each state must have positive mass for emission update"
             raise HMMConvergenceError(msg)
-        means[state_idx] = np.sum(usable_obs * state_weights[:, None], axis=0) / weight_sum
+        with np.errstate(under="ignore"):
+            weighted_sum = np.sum(usable_obs * state_weights[:, None], axis=0)
+        means[state_idx] = weighted_sum / weight_sum
         covs[state_idx] = shrink_emission_covariance(usable_obs, state_weights)
     return means, covs
 
@@ -456,9 +461,13 @@ def _transition_objective(
     log_leave = np.log(leave_prob)
     log_stay = np.log1p(-leave_prob)
     log_offdiag_share = np.log(float(STATE_COUNT - 1))
-    nll = -float(
-        np.sum(data.stay_weight * log_stay + data.leave_weight * (log_leave - log_offdiag_share)),
-    )
+    with np.errstate(under="ignore"):
+        nll = -float(
+            np.sum(
+                data.stay_weight * log_stay
+                + data.leave_weight * (log_leave - log_offdiag_share),
+            ),
+        )
     return nll + data.l2_penalty * float(np.sum(beta * beta))
 
 
@@ -637,7 +646,9 @@ def _label_map_from_gamma_returns(
         if total <= 0.0:
             msg = "each state must have positive mass for label identification"
             raise HMMConvergenceError(msg)
-        averages[state_idx] = float(np.sum(weights * forward_returns[parameter_mask]) / total)
+        with np.errstate(under="ignore"):
+            weighted_return = np.sum(weights * forward_returns[parameter_mask]) / total
+        averages[state_idx] = float(weighted_return)
     return build_label_map(averages)
 
 
