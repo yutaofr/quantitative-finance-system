@@ -176,9 +176,12 @@ def test_run_backtest_job_writes_acceptance_report_next_to_results(
     )
 
     report = json.loads((tmp_path / "backtest" / "acceptance_report.json").read_text())
+    metadata = json.loads((tmp_path / "backtest" / "backtest_metadata.json").read_text())
     assert code in {0, 3}
     assert output_path.exists()
     assert report["items"][0]["name"] == "bit_identical_determinism"
+    assert metadata["actual_start"] == "2024-01-05"
+    assert metadata["effective_strict_start"] == "2024-01-05"
 
 
 def test_run_backtest_job_clips_start_to_effective_strict_week(
@@ -256,11 +259,14 @@ def test_run_backtest_job_clips_start_to_effective_strict_week(
         ),
     )
 
+    metadata = json.loads((tmp_path / "backtest" / "backtest_metadata.json").read_text())
     assert code in {0, 3}
     assert seen_as_of == [date(2024, 1, 19), date(2024, 1, 26)]
+    assert metadata["actual_start"] == "2024-01-19"
+    assert metadata["effective_strict_start"] == "2024-01-19"
 
 
-def test_run_backtest_job_preserves_output_order_with_parallel_workers(
+def test_run_backtest_job_preserves_output_order_with_process_workers(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

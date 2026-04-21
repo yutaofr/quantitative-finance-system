@@ -93,6 +93,40 @@ def _fetch_training_series(
     return fetched
 
 
+def fit_backtest_training_artifacts(
+    as_of: date,
+    series: Mapping[str, TimeSeries],
+    cfg: FrozenConfig,
+    feature_cache: Any = None,
+) -> TrainingArtifacts:
+    """pure. Build deterministic backtest training artifacts for one week."""
+    return build_training_artifacts(
+        as_of,
+        series,
+        cfg,
+        rng=deterministic_training_rng(cfg, as_of),
+        feature_cache=feature_cache,
+    )
+
+
+def infer_backtest_weekly(
+    as_of: date,
+    cfg: FrozenConfig,
+    series: Mapping[str, TimeSeries],
+    training_artifacts: TrainingArtifacts,
+    feature_cache: Any = None,
+) -> WeeklyOutput:
+    """pure. Run one deterministic backtest weekly inference step."""
+    vintage_mode: VintageMode = "strict" if as_of >= cfg.strict_pit_start else "pseudo"
+    return run_weekly(
+        as_of,
+        vintage_mode,
+        series,
+        training_artifacts,
+        feature_cache=feature_cache,
+    )
+
+
 def build_train_runner_deps(
     secrets: AdapterSecrets,
     *,
@@ -138,43 +172,13 @@ def build_backtest_runner_deps(
         secrets, cache_root=cache_root, nasdaq_cache_root=nasdaq_cache_root
     )
 
-    def fit_training_artifacts(
-        as_of: date,
-        series: Mapping[str, TimeSeries],
-        cfg: FrozenConfig,
-        feature_cache: Any = None,
-    ) -> TrainingArtifacts:
-        return build_training_artifacts(
-            as_of,
-            series,
-            cfg,
-            rng=deterministic_training_rng(cfg, as_of),
-            feature_cache=feature_cache,
-        )
-
-    def infer(
-        as_of: date,
-        cfg: FrozenConfig,
-        series: Mapping[str, TimeSeries],
-        training_artifacts: TrainingArtifacts,
-        feature_cache: Any = None,
-    ) -> WeeklyOutput:
-        vintage_mode: VintageMode = "strict" if as_of >= cfg.strict_pit_start else "pseudo"
-        return run_weekly(
-            as_of,
-            vintage_mode,
-            series,
-            training_artifacts,
-            feature_cache=feature_cache,
-        )
-
     def write_result(result: BacktestResult, path: Path) -> None:
         write_backtest_jsonl(result, path)
 
     return BacktestRunnerDeps(
         fetch_series=train_deps.fetch_series,
-        fit_training_artifacts=fit_training_artifacts,
-        infer_weekly=infer,
+        fit_training_artifacts=fit_backtest_training_artifacts,
+        infer_weekly=infer_backtest_weekly,
         write_result=write_result,
         max_workers=max(1, min(os.cpu_count() or 1, 4)),
     )

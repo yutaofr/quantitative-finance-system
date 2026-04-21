@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import asdict, dataclass
 from datetime import date
 import json
+import multiprocessing
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -49,6 +50,8 @@ InferWeekly = Callable[
 ]
 WriteBacktestResult = Callable[[BacktestResult, Path], None]
 
+_WORKER_STATE: dict[str, object] = {}
+
 
 @dataclass(frozen=True, slots=True)
 class BacktestRunnerDeps:
@@ -61,11 +64,35 @@ class BacktestRunnerDeps:
     max_workers: int = 1
 
 
+@dataclass(frozen=True, slots=True)
+class BacktestRuntimeMetadata:
+    """io: Deterministic runtime metadata for one backtest invocation."""
+
+    requested_start: str
+    effective_strict_start: str
+    actual_start: str
+    end: str
+    vintage_mode: VintageMode
+    max_workers: int
+
+
 def write_backtest_jsonl(result: BacktestResult, path: Path) -> None:
     """io: Persist weekly backtest outputs as deterministic JSONL."""
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = b"".join(serialize_weekly_output(output) for output in result.outputs)
     path.write_bytes(payload)
+
+
+def write_backtest_metadata(path: Path, metadata: BacktestRuntimeMetadata) -> None:
+    """io: Persist deterministic backtest runtime metadata."""
+    payload = json.dumps(
+        asdict(metadata),
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{payload}\n", encoding="utf-8")
 
 
 def write_acceptance_report(
@@ -99,7 +126,53 @@ def write_acceptance_report(
     return report.passed
 
 
-def _run_walkforward_parallel(  # noqa: PLR0913
+def _is_process_safe_callable(func: object) -> bool:
+    module = getattr(func, "__module__", "")
+    qualname = getattr(func, "__qualname__", "")
+    return callable(func) and "<locals>" not in qualname and module not in {"", "__main__"}
+
+
+def _configure_process_worker(
+    series: Mapping[str, TimeSeries],
+    cfg: FrozenConfig,
+    fit_training_artifacts: FitTrainingArtifacts,
+    infer_weekly: InferWeekly,
+    feature_cache: Mapping[date, Any] | None,
+) -> None:
+    _WORKER_STATE["series"] = series
+    _WORKER_STATE["cfg"] = cfg
+    _WORKER_STATE["fit"] = fit_training_artifacts
+    _WORKER_STATE["infer"] = infer_weekly
+    _WORKER_STATE["feature_cache"] = feature_cache
+
+
+def _clear_process_worker() -> None:
+    _WORKER_STATE.clear()
+
+
+def _run_backtest_week(as_of: date) -> WeeklyOutput:
+    series = _WORKER_STATE.get("series")
+    cfg = _WORKER_STATE.get("cfg")
+    fit_training_artifacts = _WORKER_STATE.get("fit")
+    infer_weekly = _WORKER_STATE.get("infer")
+    feature_cache = _WORKER_STATE.get("feature_cache")
+    if (
+        not isinstance(series, Mapping)
+        or not isinstance(cfg, FrozenConfig)
+        or not callable(fit_training_artifacts)
+        or not callable(infer_weekly)
+    ):
+        msg = "backtest worker state is not initialized"
+        raise RuntimeError(msg)
+    history = _slice_series_history(series, as_of)
+    training_artifacts = fit_training_artifacts(as_of, history, cfg, feature_cache)
+    return cast(
+        WeeklyOutput,
+        infer_weekly(as_of, cfg, history, training_artifacts, feature_cache),
+    )
+
+
+def _run_walkforward_process_pool(  # noqa: PLR0913
     start: date,
     end: date,
     series: Mapping[str, TimeSeries],
@@ -111,7 +184,12 @@ def _run_walkforward_parallel(  # noqa: PLR0913
     max_workers: int,
 ) -> BacktestResult:
     weeks = _weekly_dates(start, end)
-    if max_workers <= 1 or len(weeks) <= 1:
+    if (
+        max_workers <= 1
+        or len(weeks) <= 1
+        or not _is_process_safe_callable(fit_training_artifacts)
+        or not _is_process_safe_callable(infer_weekly)
+    ):
         return run_walkforward(
             start,
             end,
@@ -121,15 +199,23 @@ def _run_walkforward_parallel(  # noqa: PLR0913
             infer_weekly=infer_weekly,
             feature_cache=feature_cache,
         )
-
-    def run_one_week(as_of: date) -> WeeklyOutput:
-        history = _slice_series_history(series, as_of)
-        training_artifacts = fit_training_artifacts(as_of, history, cfg, feature_cache)
-        return infer_weekly(as_of, cfg, history, training_artifacts, feature_cache)
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_by_week = {week: executor.submit(run_one_week, week) for week in weeks}
-        outputs = tuple(future_by_week[week].result() for week in weeks)
+    context = multiprocessing.get_context("spawn")
+    try:
+        with ProcessPoolExecutor(
+            max_workers=max_workers,
+            mp_context=context,
+            initializer=_configure_process_worker,
+            initargs=(
+                series,
+                cfg,
+                fit_training_artifacts,
+                infer_weekly,
+                feature_cache,
+            ),
+        ) as executor:
+            outputs = tuple(executor.map(_run_backtest_week, weeks))
+    finally:
+        _clear_process_worker()
     return BacktestResult(outputs=outputs)
 
 
@@ -154,8 +240,19 @@ def run_backtest_job(
             feature_cache=feature_cache,
         )
     run_start = max(start, effective_start) if vintage_mode == "strict" else start
+    write_backtest_metadata(
+        output_path.with_name("backtest_metadata.json"),
+        BacktestRuntimeMetadata(
+            requested_start=start.isoformat(),
+            effective_strict_start=effective_start.isoformat(),
+            actual_start=run_start.isoformat(),
+            end=end.isoformat(),
+            vintage_mode=vintage_mode,
+            max_workers=deps.max_workers,
+        ),
+    )
     if deps.max_workers > 1:
-        result = _run_walkforward_parallel(
+        result = _run_walkforward_process_pool(
             run_start,
             end,
             series,
