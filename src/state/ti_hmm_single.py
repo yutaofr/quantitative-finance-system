@@ -9,6 +9,7 @@ from typing import cast
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import minimize  # type: ignore[import-untyped]
+from scipy.special import logsumexp  # type: ignore[import-untyped]
 
 from engine_types import Stance
 from errors import HMMConvergenceError
@@ -172,17 +173,16 @@ def logsumexp_stable(
     *,
     axis: int | None = None,
 ) -> np.float64 | NDArray[np.float64]:
-    """pure. Compute log(sum(exp(values))) using max-shift stabilization."""
+    """pure. Compute log(sum(exp(values))) using scipy logsumexp."""
     arr = np.asarray(values, dtype=np.float64)
     if not np.isfinite(arr).all():
         msg = "logsumexp inputs must be finite"
         raise ValueError(msg)
-    max_value = np.max(arr, axis=axis, keepdims=True)
-    shifted_sum = np.sum(np.exp(arr - max_value), axis=axis, keepdims=True)
-    result = max_value + np.log(shifted_sum)
+    with np.errstate(under="ignore"):
+        result = logsumexp(arr, axis=axis)
     if axis is None:
-        return np.float64(np.squeeze(result))
-    return cast(NDArray[np.float64], np.squeeze(result, axis=axis))
+        return np.float64(result)
+    return cast(NDArray[np.float64], result)
 
 
 def _sigmoid_clipped(logit: NDArray[np.float64] | float) -> NDArray[np.float64]:
@@ -380,14 +380,16 @@ def e_step_smooth(
     usable = _validate_usable_mask(usable_mask, log_emission.shape[0])
     usable_end = int(np.flatnonzero(usable)[-1]) + 1
 
-    gamma = np.exp(filtering.log_alpha)
+    with np.errstate(under="ignore"):
+        gamma = np.exp(filtering.log_alpha)
     xi_count = max(usable_end - 1, 0)
     xi = np.empty((xi_count, STATE_COUNT, STATE_COUNT), dtype=np.float64)
     if xi_count > 0:
         log_beta = _log_backward_smooth(log_transition, log_emission, usable_end)
         log_gamma = filtering.log_alpha[:usable_end] + log_beta
         log_gamma -= cast(NDArray[np.float64], logsumexp_stable(log_gamma, axis=1))[:, None]
-        gamma[:usable_end] = np.exp(log_gamma)
+        with np.errstate(under="ignore"):
+            gamma[:usable_end] = np.exp(log_gamma)
 
         for time_idx in range(xi_count):
             log_xi_t = (
@@ -397,7 +399,8 @@ def e_step_smooth(
                 + log_beta[time_idx + 1, None, :]
             )
             log_xi_t -= float(logsumexp_stable(log_xi_t.reshape(-1)))
-            xi[time_idx] = np.exp(log_xi_t)
+            with np.errstate(under="ignore"):
+                xi[time_idx] = np.exp(log_xi_t)
 
     return HMMSmoothingResult(
         gamma=gamma,

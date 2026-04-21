@@ -4,8 +4,10 @@ from collections.abc import Mapping
 from datetime import date, timedelta
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+import pytest
 
 from app.backtest_runner import BacktestRunnerDeps, run_backtest_job, write_backtest_jsonl
 from config_types import FrozenConfig
@@ -88,16 +90,26 @@ def _output(as_of: date) -> WeeklyOutput:
     )
 
 
-def test_run_backtest_job_writes_acceptance_report_next_to_results(tmp_path: Path) -> None:
+def test_run_backtest_job_writes_acceptance_report_next_to_results(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     def fetch_series(_as_of: date, _vintage_mode: str) -> Mapping[str, TimeSeries]:
         start = date(2024, 1, 5)
+        timestamps = np.array(
+            [(start + timedelta(weeks=idx)).isoformat() for idx in range(60)],
+            dtype="datetime64[D]",
+        )
         return {
             "NASDAQXNDX": TimeSeries(
                 series_id="NASDAQXNDX",
-                timestamps=np.array(
-                    [(start + timedelta(weeks=idx)).isoformat() for idx in range(60)],
-                    dtype="datetime64[D]",
-                ),
+                timestamps=timestamps,
+                values=np.ones(60, dtype=np.float64),
+                is_pseudo_pit=False,
+            ),
+            "DGS10": TimeSeries(
+                series_id="DGS10",
+                timestamps=timestamps,
                 values=np.ones(60, dtype=np.float64),
                 is_pseudo_pit=False,
             ),
@@ -107,6 +119,7 @@ def test_run_backtest_job_writes_acceptance_report_next_to_results(tmp_path: Pat
         _as_of: date,
         _series: Mapping[str, TimeSeries],
         _cfg: FrozenConfig,
+        _feature_cache: Any = None,
     ) -> TrainingArtifacts:
         return TrainingArtifacts(
             utility_zstats=None,
@@ -120,8 +133,32 @@ def test_run_backtest_job_writes_acceptance_report_next_to_results(tmp_path: Pat
         _cfg: FrozenConfig,
         _series: Mapping[str, TimeSeries],
         _training_artifacts: TrainingArtifacts,
+        _feature_cache: Any = None,
     ) -> WeeklyOutput:
         return _output(as_of)
+
+    monkeypatch.setattr(
+        "inference.train.compute_effective_strict_acceptance_start_from_series",
+        lambda *_args, **_kwargs: date(2024, 1, 5),
+    )
+    monkeypatch.setattr(
+        "app.backtest_runner.compute_effective_strict_acceptance_start_from_series",
+        lambda *_args, **_kwargs: date(2024, 1, 5),
+    )
+    monkeypatch.setattr(
+        "inference.train.build_feature_block",
+        lambda _series, _week: (
+            np.zeros(10, dtype=np.float64),
+            np.zeros(10, dtype=np.bool_),
+        ),
+    )
+    monkeypatch.setattr(
+        "app.backtest_runner.build_feature_block",
+        lambda _series, _week: (
+            np.zeros(10, dtype=np.float64),
+            np.zeros(10, dtype=np.bool_),
+        ),
+    )
 
     output_path = tmp_path / "backtest" / "backtest_results.jsonl"
     code = run_backtest_job(

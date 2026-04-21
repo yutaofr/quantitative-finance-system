@@ -32,8 +32,7 @@ def test_load_frozen_config_merges_cli_over_env_over_yaml(tmp_path: Path) -> Non
     (config_dir / "backtest.yaml").write_text(
         "block_lengths: [52, 78]\nbootstrap_replications: 2000\n"
         "coverage_tol: 0.03\ncrps_min_improve: 0.05\nceq_floor: -0.005\n"
-        "maxdd_tol: 0.03\nturnover_cap: 1.5\nblocked_cap: 0.15\n"
-        'effective_strict_start: "2014-11-28"\n',
+        "maxdd_tol: 0.03\nturnover_cap: 1.5\nblocked_cap: 0.15\n",
         encoding="utf-8",
     )
     (config_dir / "data.yaml").write_text(
@@ -50,7 +49,7 @@ def test_load_frozen_config_merges_cli_over_env_over_yaml(tmp_path: Path) -> Non
     assert cfg.timezone == "Europe/Paris"
     assert cfg.random_seed == 123
     assert cfg.band == 7.0
-    assert cfg.effective_strict_start.isoformat() == "2014-11-28"
+    assert cfg.strict_pit_start.isoformat() == "2012-01-06"
 
 
 def test_load_adapter_secrets_keeps_credentials_out_of_frozen_config(tmp_path: Path) -> None:
@@ -75,8 +74,7 @@ def test_load_adapter_secrets_keeps_credentials_out_of_frozen_config(tmp_path: P
     (config_dir / "backtest.yaml").write_text(
         "block_lengths: [52, 78]\nbootstrap_replications: 2000\n"
         "coverage_tol: 0.03\ncrps_min_improve: 0.05\nceq_floor: -0.005\n"
-        "maxdd_tol: 0.03\nturnover_cap: 1.5\nblocked_cap: 0.15\n"
-        'effective_strict_start: "2014-11-28"\n',
+        "maxdd_tol: 0.03\nturnover_cap: 1.5\nblocked_cap: 0.15\n",
         encoding="utf-8",
     )
     (config_dir / "data.yaml").write_text(

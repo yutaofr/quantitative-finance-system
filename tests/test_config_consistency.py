@@ -32,4 +32,3 @@ def test_frozen_constants_match_srd_v8_7() -> None:
     assert backtest["maxdd_tol"] == 0.03
     assert backtest["turnover_cap"] == 1.5
     assert backtest["blocked_cap"] == 0.15
-    assert backtest["effective_strict_start"] == "2014-11-28"

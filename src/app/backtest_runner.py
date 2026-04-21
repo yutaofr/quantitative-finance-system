@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -21,15 +22,23 @@ from backtest.metrics import realized_forward_returns
 from backtest.walkforward import BacktestResult, run_walkforward
 from config_types import FrozenConfig
 from engine_types import TimeSeries, VintageMode, WeeklyOutput
+from features.block_builder import build_feature_block
+from inference.train import (
+    _weekly_dates_from_series,
+    compute_effective_strict_acceptance_start_from_series,
+)
 from inference.weekly import TrainingArtifacts
 
 EXIT_OK = 0
 EXIT_ACCEPTANCE_FAILED = 3
 
 FetchSeries = Callable[[date, VintageMode], Mapping[str, TimeSeries]]
-FitTrainingArtifacts = Callable[[date, Mapping[str, TimeSeries], FrozenConfig], TrainingArtifacts]
+FitTrainingArtifacts = Callable[
+    [date, Mapping[str, TimeSeries], FrozenConfig, Mapping[date, Any] | None],
+    TrainingArtifacts,
+]
 InferWeekly = Callable[
-    [date, FrozenConfig, Mapping[str, TimeSeries], TrainingArtifacts],
+    [date, FrozenConfig, Mapping[str, TimeSeries], TrainingArtifacts, Mapping[date, Any] | None],
     WeeklyOutput,
 ]
 WriteBacktestResult = Callable[[BacktestResult, Path], None]
@@ -52,7 +61,12 @@ def write_backtest_jsonl(result: BacktestResult, path: Path) -> None:
     path.write_bytes(payload)
 
 
-def write_acceptance_report(result: BacktestResult, cfg: FrozenConfig, path: Path) -> bool:
+def write_acceptance_report(
+    result: BacktestResult,
+    cfg: FrozenConfig,
+    path: Path,
+    effective_strict_start: date,
+) -> bool:
     """io: Persist deterministic SRD §16 acceptance report JSON."""
     report = evaluate_backtest_acceptance(
         result,
@@ -65,7 +79,7 @@ def write_acceptance_report(result: BacktestResult, cfg: FrozenConfig, path: Pat
         thresholds=acceptance_thresholds_from_config(cfg),
         bootstrap_replications=cfg.bootstrap_replications,
         rng=np.random.default_rng(cfg.random_seed),
-        effective_strict_start=cfg.effective_strict_start,
+        effective_strict_start=effective_strict_start,
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(
@@ -89,6 +103,8 @@ def run_backtest_job(
     """io: execute walk-forward backtest over PIT-truncated history."""
     vintage_mode: VintageMode = "strict" if end >= cfg.strict_pit_start else "pseudo"
     series = deps.fetch_series(end, vintage_mode)
+    all_weeks = _weekly_dates_from_series(series, end)
+    feature_cache = {week: build_feature_block(series, week) for week in all_weeks}
     result = run_walkforward(
         start,
         end,
@@ -96,6 +112,7 @@ def run_backtest_job(
         cfg,
         fit_training_artifacts=deps.fit_training_artifacts,
         infer_weekly=deps.infer_weekly,
+        feature_cache=feature_cache,
     )
     target_series = series.get("NASDAQXNDX")
     if target_series is None:
@@ -110,9 +127,15 @@ def run_backtest_job(
         realized_52w_returns=tuple(float(value) for value in realized),
     )
     deps.write_result(result_with_targets, output_path)
+    effective_start = compute_effective_strict_acceptance_start_from_series(
+        series,
+        strict_mode_start=cfg.strict_pit_start,
+        feature_cache=feature_cache,
+    )
     passed = write_acceptance_report(
         result_with_targets,
         cfg,
         output_path.with_name("acceptance_report.json"),
+        effective_start,
     )
     return EXIT_OK if passed else EXIT_ACCEPTANCE_FAILED

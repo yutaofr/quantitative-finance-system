@@ -10,7 +10,7 @@ from typing import Any, cast
 
 import yaml
 
-from config_types import FrozenConfig, SRD_VERSION
+from config_types import SRD_VERSION, FrozenConfig
 
 DEFAULT_CONFIG_DIR = Path("configs")
 DEFAULT_ARTIFACTS_ROOT = Path("artifacts")

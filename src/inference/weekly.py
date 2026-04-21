@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -178,11 +178,15 @@ def _weekly_dates_from_series(series: Mapping[str, TimeSeries], as_of: date) -> 
 def _feature_history(
     series: Mapping[str, TimeSeries],
     as_of: date,
+    feature_cache: Any = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.bool_]]:
     rows: list[NDArray[np.float64]] = []
     masks: list[NDArray[np.bool_]] = []
     for week in _weekly_dates_from_series(series, as_of):
-        raw, missing = build_feature_block(series, week)
+        if feature_cache is not None and week in feature_cache:
+            raw, missing = feature_cache[week]
+        else:
+            raw, missing = build_feature_block(series, week)
         rows.append(raw)
         masks.append(missing)
     if not rows:
@@ -243,22 +247,30 @@ def _distribution_output(full_quantiles: NDArray[np.float64]) -> DistributionOut
     )
 
 
-def run_weekly(
+def run_weekly(  # noqa: PLR0913
     as_of: date,
     vintage_mode: VintageMode,
     series: Mapping[str, TimeSeries],
     training_artifacts: TrainingArtifacts,
     *,
     previous_offense_final: float = DEFAULT_PREVIOUS_OFFENSE,
+    feature_cache: Any = None,
 ) -> WeeklyOutput:
     """pure. Assemble one SRD §11 WeeklyOutput from injected PIT data and artifacts."""
     zstats, thresholds, qr_coefs = _require_artifacts(training_artifacts)
-    raw, missing_mask = build_feature_block(series, as_of)
+    if feature_cache is not None and as_of in feature_cache:
+        raw, missing_mask = feature_cache[as_of]
+    else:
+        raw, missing_mask = build_feature_block(series, as_of)
     missing_rate = float(np.mean(missing_mask))
     if missing_rate > MISSING_BLOCKED:
         return blocked_weekly_output(as_of, vintage_mode=vintage_mode, missing_rate=missing_rate)
 
-    _raw_history, x_scaled_history, _missing_history = _feature_history(series, as_of)
+    _raw_history, x_scaled_history, _missing_history = _feature_history(
+        series,
+        as_of,
+        feature_cache,
+    )
     if x_scaled_history.shape[0] == 0:
         return blocked_weekly_output(as_of, vintage_mode=vintage_mode, missing_rate=missing_rate)
     x_scaled = x_scaled_history[-1]

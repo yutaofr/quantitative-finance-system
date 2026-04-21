@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -105,6 +106,7 @@ def _training_matrix(
     series: Mapping[str, TimeSeries],
     *,
     min_training_weeks: int,
+    feature_cache: Any = None,
 ) -> _TrainingMatrix:
     if "NASDAQXNDX" not in series:
         msg = "training requires NASDAQXNDX to compute 52-week forward returns"
@@ -114,7 +116,10 @@ def _training_matrix(
     targets: list[float] = []
     dates: list[date] = []
     for week in _weekly_dates_from_series(series, train_end):
-        raw, missing = build_feature_block(series, week)
+        if feature_cache is not None and week in feature_cache:
+            raw, missing = feature_cache[week]
+        else:
+            raw, missing = build_feature_block(series, week)
         y_52w = _forward_52w_return(series["NASDAQXNDX"], week)
         if not missing.any() and np.isfinite(y_52w):
             dates.append(week)
@@ -259,6 +264,37 @@ def _decision_training_stats(
     return zstats, _offense_thresholds(utilities)
 
 
+def compute_effective_strict_acceptance_start_from_series(
+    series: Mapping[str, TimeSeries],
+    *,
+    strict_mode_start: date = date(2012, 1, 6),
+    min_training_weeks: int = DEFAULT_MIN_TRAINING_WEEKS,
+    embargo_weeks: int = TRAINING_EMBARGO_WEEKS,
+    feature_cache: Any = None,
+) -> date:
+    """pure. Determine the first valid strict-PIT inference week."""
+    all_weeks = _weekly_dates_from_series(series, date(2099, 12, 31))
+    valid_weeks: list[date] = []
+    missing_dict: dict[date, bool] = {}
+    for week in all_weeks:
+        if feature_cache is not None and week in feature_cache:
+            _raw, missing = feature_cache[week]
+        else:
+            _raw, missing = build_feature_block(series, week)
+        missing_dict[week] = bool(missing.any())
+        y_52w = _forward_52w_return(series["NASDAQXNDX"], week)
+        if not missing_dict[week] and np.isfinite(y_52w):
+            valid_weeks.append(week)
+
+    for candidate in (week for week in all_weeks if week >= strict_mode_start):
+        train_end = candidate - timedelta(weeks=embargo_weeks)
+        finite_count = sum(1 for week in valid_weeks if week <= train_end)
+        if finite_count >= min_training_weeks and not missing_dict.get(candidate, True):
+            return candidate
+    msg = "no effective strict start date could be found"
+    raise ValueError(msg)
+
+
 def build_training_artifacts(  # noqa: PLR0913
     as_of: date,
     series: Mapping[str, TimeSeries],
@@ -268,9 +304,15 @@ def build_training_artifacts(  # noqa: PLR0913
     min_training_weeks: int = DEFAULT_MIN_TRAINING_WEEKS,
     fit_hmm_fn: Callable[..., HMMModel] = fit_hmm,
     fit_qr_fn: Callable[..., QRCoefs] = fit_linear_quantiles,
+    feature_cache: Any = None,
 ) -> TrainingArtifacts:
     """pure. Fit SRD §7-§9 artifacts from PIT-truncated history."""
-    matrix = _training_matrix(as_of, series, min_training_weeks=min_training_weeks)
+    matrix = _training_matrix(
+        as_of,
+        series,
+        min_training_weeks=min_training_weeks,
+        feature_cache=feature_cache,
+    )
     y_obs, h = _hmm_inputs(matrix.x_scaled)
     y_aligned = matrix.y_52w[1:]
     x_aligned = matrix.x_scaled[1:]

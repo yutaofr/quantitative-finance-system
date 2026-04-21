@@ -130,24 +130,41 @@ def test_run_walkforward_only_exposes_history_up_to_each_week() -> None:
     seen_fit_max: list[np.datetime64] = []
     seen_infer_max: list[np.datetime64] = []
 
-    result = run_walkforward(
-        start=date(2024, 1, 5),
-        end=date(2024, 1, 12),
-        series=series,
-        cfg=_config(),
-        fit_training_artifacts=lambda as_of, history, cfg: _fit_training_artifacts(
+    def fit_with_cache(
+        as_of: date,
+        history: Mapping[str, TimeSeries],
+        cfg: FrozenConfig,
+        _feature_cache: object = None,
+    ) -> TrainingArtifacts:
+        return _fit_training_artifacts(
             as_of,
             history,
             cfg,
             seen_fit_max=seen_fit_max,
-        ),
-        infer_weekly=lambda as_of, cfg, history, training_artifacts: _infer_weekly(
+        )
+
+    def infer_with_cache(
+        as_of: date,
+        cfg: FrozenConfig,
+        history: Mapping[str, TimeSeries],
+        training_artifacts: TrainingArtifacts,
+        _feature_cache: object = None,
+    ) -> WeeklyOutput:
+        return _infer_weekly(
             as_of,
             cfg,
             history,
             training_artifacts,
             seen_infer_max=seen_infer_max,
-        ),
+        )
+
+    result = run_walkforward(
+        start=date(2024, 1, 5),
+        end=date(2024, 1, 12),
+        series=series,
+        cfg=_config(),
+        fit_training_artifacts=fit_with_cache,
+        infer_weekly=infer_with_cache,
     )
 
     assert [output.as_of_date for output in result.outputs] == [

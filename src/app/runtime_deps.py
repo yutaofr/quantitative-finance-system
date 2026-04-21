@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from app.backtest_runner import BacktestRunnerDeps, write_backtest_jsonl
 from app.config_loader import AdapterSecrets
@@ -140,12 +141,14 @@ def build_backtest_runner_deps(
         as_of: date,
         series: Mapping[str, TimeSeries],
         cfg: FrozenConfig,
+        feature_cache: Any = None,
     ) -> TrainingArtifacts:
         return build_training_artifacts(
             as_of,
             series,
             cfg,
             rng=deterministic_training_rng(cfg, as_of),
+            feature_cache=feature_cache,
         )
 
     def infer(
@@ -153,9 +156,16 @@ def build_backtest_runner_deps(
         cfg: FrozenConfig,
         series: Mapping[str, TimeSeries],
         training_artifacts: TrainingArtifacts,
+        feature_cache: Any = None,
     ) -> WeeklyOutput:
         vintage_mode: VintageMode = "strict" if as_of >= cfg.strict_pit_start else "pseudo"
-        return run_weekly(as_of, vintage_mode, series, training_artifacts)
+        return run_weekly(
+            as_of,
+            vintage_mode,
+            series,
+            training_artifacts,
+            feature_cache=feature_cache,
+        )
 
     def write_result(result: BacktestResult, path: Path) -> None:
         write_backtest_jsonl(result, path)

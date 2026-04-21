@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
+from typing import Any
 
 import numpy as np
 
@@ -13,11 +14,11 @@ from engine_types import TimeSeries, WeeklyOutput
 from inference.weekly import TrainingArtifacts
 
 FitTrainingArtifacts = Callable[
-    [date, Mapping[str, TimeSeries], FrozenConfig],
+    [date, Mapping[str, TimeSeries], FrozenConfig, Mapping[date, Any] | None],
     TrainingArtifacts,
 ]
 InferWeekly = Callable[
-    [date, FrozenConfig, Mapping[str, TimeSeries], TrainingArtifacts],
+    [date, FrozenConfig, Mapping[str, TimeSeries], TrainingArtifacts, Mapping[date, Any] | None],
     WeeklyOutput,
 ]
 
@@ -68,11 +69,12 @@ def run_walkforward(  # noqa: PLR0913
     *,
     fit_training_artifacts: FitTrainingArtifacts,
     infer_weekly: InferWeekly,
+    feature_cache: Mapping[date, Any] | None = None,
 ) -> BacktestResult:
     """pure. Run weekly walk-forward inference on PIT-truncated history only."""
     outputs: list[WeeklyOutput] = []
     for as_of in _weekly_dates(start, end):
         history = _slice_series_history(series, as_of)
-        training_artifacts = fit_training_artifacts(as_of, history, cfg)
-        outputs.append(infer_weekly(as_of, cfg, history, training_artifacts))
+        training_artifacts = fit_training_artifacts(as_of, history, cfg, feature_cache)
+        outputs.append(infer_weekly(as_of, cfg, history, training_artifacts, feature_cache))
     return BacktestResult(outputs=tuple(outputs))

@@ -346,8 +346,9 @@ def _training_artifacts() -> TrainingArtifacts:
 
 def _fit_training_artifacts(
     _as_of: date,
-    _history: Mapping[str, TimeSeries],
+    _series: Mapping[str, TimeSeries],
     _cfg: FrozenConfig,
+    _feature_cache: Any = None,
 ) -> TrainingArtifacts:
     return _training_artifacts()
 
@@ -355,10 +356,17 @@ def _fit_training_artifacts(
 def _infer_weekly(
     as_of: date,
     _cfg: FrozenConfig,
-    history: Mapping[str, TimeSeries],
-    training_artifacts: TrainingArtifacts,
+    _series: Mapping[str, TimeSeries],
+    _training_artifacts: TrainingArtifacts,
+    _feature_cache: Any = None,
 ) -> WeeklyOutput:
-    return run_weekly(as_of, "strict", history, training_artifacts)
+    return run_weekly(
+        as_of,
+        "strict",
+        _series,
+        _training_artifacts,
+        feature_cache=_feature_cache,
+    )
 
 
 def _walkforward_bytes(series: Mapping[str, TimeSeries], start: date, end: date) -> bytes:
