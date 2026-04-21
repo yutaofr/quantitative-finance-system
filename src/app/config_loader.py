@@ -10,7 +10,7 @@ from typing import Any, cast
 
 import yaml
 
-from config_types import SRD_VERSION, FrozenConfig
+from config_types import FrozenConfig, SRD_VERSION
 
 DEFAULT_CONFIG_DIR = Path("configs")
 DEFAULT_ARTIFACTS_ROOT = Path("artifacts")
@@ -45,15 +45,11 @@ def _merge_runtime_values(  # noqa: PLR0913
     strict_pit_start = date.fromisoformat(
         str(overrides.get("strict_pit_start", data["vintage_modes"]["strict_start"])),
     )
-    effective_strict_start = date.fromisoformat(
-        str(overrides.get("effective_strict_start", backtest["effective_strict_start"])),
-    )
     return FrozenConfig(
         srd_version=SRD_VERSION,
         random_seed=random_seed,
         timezone=timezone,
         strict_pit_start=strict_pit_start,
-        effective_strict_start=effective_strict_start,
         missing_rate_degraded=float(state["missing_rate_degraded"]),
         missing_rate_blocked=float(state["missing_rate_blocked"]),
         quantile_gap=float(law["quantile_gap"]),
