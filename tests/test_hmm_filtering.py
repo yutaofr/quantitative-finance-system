@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from state.ti_hmm_single import log_forward_filter, logsumexp_stable
+from state.ti_hmm_single import (
+    HMMModel,
+    infer_hmm_posterior_path,
+    log_forward_filter,
+    logsumexp_stable,
+)
 
 
 def test_log_forward_filter_matches_manual_logsumexp_recurrence() -> None:
@@ -56,3 +61,28 @@ def test_log_forward_filter_stays_finite_for_extreme_negative_likelihoods() -> N
     assert np.isfinite(result.log_alpha).all()
     assert np.isfinite(result.log_likelihood)
     assert np.allclose(np.exp(result.log_alpha).sum(axis=1), np.ones(5, dtype=np.float64))
+
+
+def test_infer_hmm_posterior_path_is_finite_and_row_normalized() -> None:
+    model = HMMModel(
+        transition_coefs=np.zeros((3, 3), dtype=np.float64),
+        emission_mean=np.zeros((3, 6), dtype=np.float64),
+        emission_cov=np.stack([np.eye(6, dtype=np.float64) for _ in range(3)]),
+        label_map={0: "DEFENSIVE", 1: "NEUTRAL", 2: "OFFENSIVE"},
+        log_likelihood=0.0,
+    )
+    y_obs = np.array(
+        [
+            [0.1, -0.2, 0.0, 0.2, 0.0, -0.1],
+            [0.0, 0.1, -0.1, 0.0, 0.1, 0.0],
+            [-0.2, 0.0, 0.1, -0.1, 0.0, 0.2],
+        ],
+        dtype=np.float64,
+    )
+    h = np.array([0.0, 0.1, -0.1], dtype=np.float64)
+
+    posterior_path = infer_hmm_posterior_path(model, y_obs, h)
+
+    assert posterior_path.shape == (3, 3)
+    assert np.isfinite(posterior_path).all()
+    assert np.allclose(posterior_path.sum(axis=1), np.ones(3, dtype=np.float64), atol=1e-8)

@@ -576,6 +576,31 @@ def _transition_objective(
     return nll + data.l2_penalty * float(np.sum(beta * beta))
 
 
+def _transition_objective_grad(
+    beta: NDArray[np.float64],
+    data: _TransitionObjectiveData,
+) -> NDArray[np.float64]:
+    logits = beta[0] + beta[1] * data.dwell + beta[2] * data.h
+    clipped_logits = np.clip(logits, -LOGIT_CLIP_BOUND, LOGIT_CLIP_BOUND)
+    with np.errstate(under="ignore"):
+        raw_prob = 1.0 / (1.0 + np.exp(-clipped_logits))
+    leave_prob = np.clip(raw_prob, TRANSITION_PROB_EPSILON, 1.0 - TRANSITION_PROB_EPSILON)
+    in_logit_range = (logits >= -LOGIT_CLIP_BOUND) & (logits <= LOGIT_CLIP_BOUND)
+    in_prob_range = (raw_prob > TRANSITION_PROB_EPSILON) & (
+        raw_prob < 1.0 - TRANSITION_PROB_EPSILON
+    )
+    active = in_logit_range & in_prob_range
+    # d/dlogit [-stay*log(1-p)-leave*log(p)] with p=sigmoid(logit)
+    slope = data.stay_weight / (1.0 - leave_prob) - data.leave_weight / leave_prob
+    factor = slope * raw_prob * (1.0 - raw_prob) * active
+    grad = np.empty(STATE_COUNT, dtype=np.float64)
+    grad[0] = float(np.sum(factor))
+    grad[1] = float(np.sum(factor * data.dwell))
+    grad[2] = float(np.sum(factor * data.h))
+    grad += 2.0 * data.l2_penalty * beta
+    return grad
+
+
 def fit_transition_coefs(
     xi: NDArray[np.float64],
     dwell: NDArray[np.float64],
@@ -623,6 +648,10 @@ def fit_transition_coefs(
 
         result = minimize(
             lambda beta, data=objective_data: _transition_objective(beta, data),
+            jac=lambda beta, data=objective_data: _transition_objective_grad(
+                np.asarray(beta, dtype=np.float64),
+                data,
+            ),
             x0=np.zeros(STATE_COUNT, dtype=np.float64),
             method="L-BFGS-B",
             options={"maxiter": max_iter},

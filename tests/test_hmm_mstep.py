@@ -5,6 +5,9 @@ import pytest
 
 from errors import HMMConvergenceError
 from state.ti_hmm_single import (
+    _transition_objective,
+    _transition_objective_grad,
+    _TransitionObjectiveData,
     fit_transition_coefs,
     transition_matrix_t,
     update_emission_parameters,
@@ -106,3 +109,38 @@ def test_fit_transition_coefs_raises_on_optimizer_failure() -> None:
 
     with pytest.raises(HMMConvergenceError, match="transition"):
         fit_transition_coefs(xi, dwell, h, max_iter=0)
+
+
+def test_transition_objective_grad_matches_finite_difference() -> None:
+    beta = np.array([0.2, -0.1, 0.3], dtype=np.float64)
+    data = _TransitionObjectiveData(
+        stay_weight=np.array([0.6, 0.5, 0.4, 0.7], dtype=np.float64),
+        leave_weight=np.array([0.4, 0.5, 0.6, 0.3], dtype=np.float64),
+        dwell=np.array([1.0, 2.0, 1.5, 3.0], dtype=np.float64),
+        h=np.array([-0.2, 0.1, 0.3, -0.1], dtype=np.float64),
+        l2_penalty=1.0e-3,
+    )
+    eps = 1.0e-6
+    analytic = _transition_objective_grad(beta, data)
+    numeric = np.empty_like(beta)
+    for idx in range(beta.shape[0]):
+        step = np.zeros_like(beta)
+        step[idx] = eps
+        plus = _transition_objective(beta + step, data)
+        minus = _transition_objective(beta - step, data)
+        numeric[idx] = (plus - minus) / (2.0 * eps)
+
+    assert np.allclose(analytic, numeric, rtol=1.0e-5, atol=1.0e-6)
+
+
+def test_fit_transition_coefs_returns_finite_coefficients_and_valid_transition_rows() -> None:
+    xi = np.full((6, 3, 3), 1.0 / 9.0, dtype=np.float64)
+    dwell = np.full((6, 3), 2.0, dtype=np.float64)
+    h = np.linspace(-0.5, 0.5, 6, dtype=np.float64)
+
+    coefs = fit_transition_coefs(xi, dwell, h, max_iter=100)
+    transition = transition_matrix_t(coefs, dwell=np.ones(3, dtype=np.float64), h_t=0.1)
+
+    assert np.isfinite(coefs).all()
+    assert np.isfinite(transition).all()
+    assert np.allclose(transition.sum(axis=1), np.ones(3, dtype=np.float64))
