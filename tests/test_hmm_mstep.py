@@ -133,6 +133,24 @@ def test_transition_objective_grad_matches_finite_difference() -> None:
     assert np.allclose(analytic, numeric, rtol=1.0e-5, atol=1.0e-6)
 
 
+def test_transition_objective_grad_remains_finite_for_extreme_logits() -> None:
+    beta = np.array([25.0, -4.0, 3.5], dtype=np.float64)
+    data = _TransitionObjectiveData(
+        stay_weight=np.array([1.0, 1.0e-250, 2.0], dtype=np.float64),
+        leave_weight=np.array([1.0e-250, 3.0, 1.0], dtype=np.float64),
+        dwell=np.array([1.0e6, -1.0e6, 2.5e5], dtype=np.float64),
+        h=np.array([1.0e-200, -1.0e-200, 5.0e-201], dtype=np.float64),
+        l2_penalty=1.0e-3,
+    )
+    old_settings = np.seterr(all="raise")
+    try:
+        gradient = _transition_objective_grad(beta, data)
+    finally:
+        np.seterr(**old_settings)
+
+    assert np.isfinite(gradient).all()
+
+
 def test_fit_transition_coefs_returns_finite_coefficients_and_valid_transition_rows() -> None:
     xi = np.full((6, 3, 3), 1.0 / 9.0, dtype=np.float64)
     dwell = np.full((6, 3), 2.0, dtype=np.float64)
@@ -144,3 +162,30 @@ def test_fit_transition_coefs_returns_finite_coefficients_and_valid_transition_r
     assert np.isfinite(coefs).all()
     assert np.isfinite(transition).all()
     assert np.allclose(transition.sum(axis=1), np.ones(3, dtype=np.float64))
+
+
+def test_fit_transition_coefs_hard_case_completes_without_floating_pointer_error() -> None:
+    xi = np.array(
+        [
+            [[0.999999, 0.0000005, 0.0000005], [0.0000005, 0.999999, 0.0000005], [0.0000005, 0.0000005, 0.999999]],
+            [[0.999999, 0.0000005, 0.0000005], [0.0000005, 0.999999, 0.0000005], [0.0000005, 0.0000005, 0.999999]],
+            [[0.999999, 0.0000005, 0.0000005], [0.0000005, 0.999999, 0.0000005], [0.0000005, 0.0000005, 0.999999]],
+        ],
+        dtype=np.float64,
+    )
+    dwell = np.array(
+        [
+            [1.0e6, 1.0e6, 1.0e6],
+            [2.0e6, 2.0e6, 2.0e6],
+            [3.0e6, 3.0e6, 3.0e6],
+        ],
+        dtype=np.float64,
+    )
+    h = np.array([1.0e-200, -1.0e-200, 5.0e-201], dtype=np.float64)
+    old_settings = np.seterr(all="raise")
+    try:
+        coefs = fit_transition_coefs(xi, dwell, h, max_iter=100)
+    finally:
+        np.seterr(**old_settings)
+
+    assert np.isfinite(coefs).all()

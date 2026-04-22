@@ -5,6 +5,8 @@ import pytest
 
 from errors import HMMConvergenceError
 from state.ti_hmm_single import (
+    _TransitionObjectiveData,
+    _transition_objective_grad,
     gaussian_log_likelihood,
     logsumexp3,
     logsumexp_axis3,
@@ -71,6 +73,29 @@ def test_transition_matrix_t_clips_extreme_logits_and_normalizes_rows() -> None:
     assert np.allclose(transition.sum(axis=1), np.ones(3, dtype=np.float64))
     assert 0.0 < transition[0, 0] < 1.0
     assert 0.0 < transition[1, 1] < 1.0
+
+
+def test_transition_objective_grad_zeroes_clipped_probability_contributions() -> None:
+    beta = np.array([0.0, 1.0, 1.0], dtype=np.float64)
+    data = _TransitionObjectiveData(
+        stay_weight=np.array([4.0, 2.0, 3.0], dtype=np.float64),
+        leave_weight=np.array([1.0, 5.0, 2.0], dtype=np.float64),
+        dwell=np.array([1000.0, -1000.0, 0.0], dtype=np.float64),
+        h=np.array([1000.0, -1000.0, 0.0], dtype=np.float64),
+        l2_penalty=0.0,
+    )
+
+    gradient = _transition_objective_grad(beta, data)
+    unclipped_data = _TransitionObjectiveData(
+        stay_weight=np.array([0.0, 0.0, 3.0], dtype=np.float64),
+        leave_weight=np.array([0.0, 0.0, 2.0], dtype=np.float64),
+        dwell=data.dwell,
+        h=data.h,
+        l2_penalty=0.0,
+    )
+    expected = _transition_objective_grad(beta, unclipped_data)
+
+    assert np.allclose(gradient, expected, rtol=0.0, atol=1.0e-12)
 
 
 def test_shrink_emission_covariance_adds_diagonal_regularization() -> None:

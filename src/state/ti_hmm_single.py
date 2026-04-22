@@ -561,7 +561,8 @@ def _transition_objective(
     beta: NDArray[np.float64],
     data: _TransitionObjectiveData,
 ) -> float:
-    logits = beta[0] + beta[1] * data.dwell + beta[2] * data.h
+    with np.errstate(under="ignore"):
+        logits = beta[0] + beta[1] * data.dwell + beta[2] * data.h
     leave_prob = _sigmoid_clipped(logits)
     log_leave = np.log(leave_prob)
     log_stay = np.log1p(-leave_prob)
@@ -573,31 +574,42 @@ def _transition_objective(
                 + data.leave_weight * (log_leave - log_offdiag_share),
             ),
         )
-    return nll + data.l2_penalty * float(np.sum(beta * beta))
+        regularization = data.l2_penalty * float(np.sum(beta * beta))
+    return nll + regularization
 
 
 def _transition_objective_grad(
     beta: NDArray[np.float64],
     data: _TransitionObjectiveData,
 ) -> NDArray[np.float64]:
-    logits = beta[0] + beta[1] * data.dwell + beta[2] * data.h
+    with np.errstate(under="ignore"):
+        logits = beta[0] + beta[1] * data.dwell + beta[2] * data.h
     clipped_logits = np.clip(logits, -LOGIT_CLIP_BOUND, LOGIT_CLIP_BOUND)
     with np.errstate(under="ignore"):
         raw_prob = 1.0 / (1.0 + np.exp(-clipped_logits))
-    leave_prob = np.clip(raw_prob, TRANSITION_PROB_EPSILON, 1.0 - TRANSITION_PROB_EPSILON)
     in_logit_range = (logits >= -LOGIT_CLIP_BOUND) & (logits <= LOGIT_CLIP_BOUND)
     in_prob_range = (raw_prob > TRANSITION_PROB_EPSILON) & (
         raw_prob < 1.0 - TRANSITION_PROB_EPSILON
     )
     active = in_logit_range & in_prob_range
-    # d/dlogit [-stay*log(1-p)-leave*log(p)] with p=sigmoid(logit)
-    slope = data.stay_weight / (1.0 - leave_prob) - data.leave_weight / leave_prob
-    factor = slope * raw_prob * (1.0 - raw_prob) * active
-    grad = np.empty(STATE_COUNT, dtype=np.float64)
-    grad[0] = float(np.sum(factor))
-    grad[1] = float(np.sum(factor * data.dwell))
-    grad[2] = float(np.sum(factor * data.h))
-    grad += 2.0 * data.l2_penalty * beta
+    grad = 2.0 * data.l2_penalty * beta
+    if not np.any(active):
+        return grad
+
+    active_idx = np.flatnonzero(active)
+    stay_weight = data.stay_weight[active_idx]
+    leave_weight = data.leave_weight[active_idx]
+    active_prob = raw_prob[active_idx]
+    dwell = data.dwell[active_idx]
+    h = data.h[active_idx]
+    # d/deta [-s log(1-p) - l log(p)] = (s + l) * p - l on the unclipped interior.
+    with np.errstate(under="ignore"):
+        factor = (stay_weight + leave_weight) * active_prob - leave_weight
+
+    grad[0] += float(np.sum(factor))
+    with np.errstate(under="ignore"):
+        grad[1] += float(np.dot(factor, dwell))
+        grad[2] += float(np.dot(factor, h))
     return grad
 
 
