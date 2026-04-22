@@ -9,7 +9,6 @@ from typing import cast
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import minimize  # type: ignore[import-untyped]
-from scipy.special import logsumexp  # type: ignore[import-untyped]
 
 from engine_types import Stance
 from errors import HMMConvergenceError
@@ -168,21 +167,69 @@ def should_degrade_hmm(
     return False
 
 
+def logsumexp3(values: NDArray[np.float64]) -> np.float64:
+    """pure. Stable log-sum-exp for one length-3 log-domain vector."""
+    arr = np.asarray(values, dtype=np.float64)
+    if arr.shape != (STATE_COUNT,):
+        msg = "logsumexp3 expects shape (3,)"
+        raise ValueError(msg)
+    if not np.isfinite(arr).all():
+        msg = "logsumexp inputs must be finite"
+        raise ValueError(msg)
+    vmax = float(max(arr[0], arr[1], arr[2]))
+    with np.errstate(under="ignore"):
+        total = float(np.exp(arr[0] - vmax) + np.exp(arr[1] - vmax) + np.exp(arr[2] - vmax))
+    return np.float64(vmax + np.log(total))
+
+
+def logsumexp_axis3(matrix: NDArray[np.float64], axis: int) -> NDArray[np.float64]:
+    """pure. Stable log-sum-exp along one axis for 3-state tensors."""
+    arr = np.asarray(matrix, dtype=np.float64)
+    if axis == 1:
+        if arr.ndim != MATRIX_NDIM or arr.shape[1] != STATE_COUNT:
+            msg = "logsumexp_axis3 axis=1 expects shape (n, 3)"
+            raise ValueError(msg)
+        if not np.isfinite(arr).all():
+            msg = "logsumexp inputs must be finite"
+            raise ValueError(msg)
+        vmax = np.maximum(np.maximum(arr[:, 0], arr[:, 1]), arr[:, 2])
+        with np.errstate(under="ignore"):
+            total = np.exp(arr[:, 0] - vmax) + np.exp(arr[:, 1] - vmax) + np.exp(arr[:, 2] - vmax)
+        return cast(NDArray[np.float64], vmax + np.log(total))
+    if axis == 0:
+        if arr.ndim != MATRIX_NDIM or arr.shape[0] != STATE_COUNT:
+            msg = "logsumexp_axis3 axis=0 expects shape (3, n)"
+            raise ValueError(msg)
+        if not np.isfinite(arr).all():
+            msg = "logsumexp inputs must be finite"
+            raise ValueError(msg)
+        vmax = np.maximum(np.maximum(arr[0, :], arr[1, :]), arr[2, :])
+        with np.errstate(under="ignore"):
+            total = np.exp(arr[0, :] - vmax) + np.exp(arr[1, :] - vmax) + np.exp(arr[2, :] - vmax)
+        return cast(NDArray[np.float64], vmax + np.log(total))
+    msg = "logsumexp_axis3 supports only axis=0 or axis=1"
+    raise ValueError(msg)
+
+
 def logsumexp_stable(
     values: NDArray[np.float64],
     *,
     axis: int | None = None,
 ) -> np.float64 | NDArray[np.float64]:
-    """pure. Compute log(sum(exp(values))) using scipy logsumexp."""
+    """pure. Compute stable log(sum(exp(values))) for production-required shapes."""
     arr = np.asarray(values, dtype=np.float64)
     if not np.isfinite(arr).all():
         msg = "logsumexp inputs must be finite"
         raise ValueError(msg)
+    if axis is not None:
+        return logsumexp_axis3(arr, axis)
+    flat = arr.reshape(-1)
+    if flat.size == STATE_COUNT:
+        return logsumexp3(flat)
+    vmax = float(np.max(flat))
     with np.errstate(under="ignore"):
-        result = logsumexp(arr, axis=axis)
-    if axis is None:
-        return np.float64(result)
-    return cast(NDArray[np.float64], result)
+        total = float(np.sum(np.exp(flat - vmax)))
+    return np.float64(vmax + np.log(total))
 
 
 def _sigmoid_clipped(logit: NDArray[np.float64] | float) -> NDArray[np.float64]:
@@ -331,9 +378,37 @@ def log_forward_filter(
 
     for time_idx in range(1, emission.shape[0]):
         previous = log_alpha[time_idx - 1]
-        predicted = cast(
-            NDArray[np.float64],
-            logsumexp_stable(previous[:, None] + transition[time_idx - 1], axis=0),
+        trans_t = transition[time_idx - 1]
+        predicted = np.empty(STATE_COUNT, dtype=np.float64)
+        predicted[0] = logsumexp3(
+            np.array(
+                [
+                    previous[0] + trans_t[0, 0],
+                    previous[1] + trans_t[1, 0],
+                    previous[2] + trans_t[2, 0],
+                ],
+                dtype=np.float64,
+            ),
+        )
+        predicted[1] = logsumexp3(
+            np.array(
+                [
+                    previous[0] + trans_t[0, 1],
+                    previous[1] + trans_t[1, 1],
+                    previous[2] + trans_t[2, 1],
+                ],
+                dtype=np.float64,
+            ),
+        )
+        predicted[2] = logsumexp3(
+            np.array(
+                [
+                    previous[0] + trans_t[0, 2],
+                    previous[1] + trans_t[1, 2],
+                    previous[2] + trans_t[2, 2],
+                ],
+                dtype=np.float64,
+            ),
         )
         joint = predicted + emission[time_idx]
         norm = float(logsumexp_stable(joint))
@@ -366,8 +441,38 @@ def _log_backward_smooth(
 ) -> NDArray[np.float64]:
     log_beta = np.zeros((usable_end, STATE_COUNT), dtype=np.float64)
     for time_idx in range(usable_end - 2, -1, -1):
-        next_terms = log_transition[time_idx] + log_emission[time_idx + 1] + log_beta[time_idx + 1]
-        log_beta[time_idx] = cast(NDArray[np.float64], logsumexp_stable(next_terms, axis=1))
+        trans_t = log_transition[time_idx]
+        rhs = log_emission[time_idx + 1] + log_beta[time_idx + 1]
+        log_beta[time_idx, 0] = logsumexp3(
+            np.array(
+                [
+                    trans_t[0, 0] + rhs[0],
+                    trans_t[0, 1] + rhs[1],
+                    trans_t[0, 2] + rhs[2],
+                ],
+                dtype=np.float64,
+            ),
+        )
+        log_beta[time_idx, 1] = logsumexp3(
+            np.array(
+                [
+                    trans_t[1, 0] + rhs[0],
+                    trans_t[1, 1] + rhs[1],
+                    trans_t[1, 2] + rhs[2],
+                ],
+                dtype=np.float64,
+            ),
+        )
+        log_beta[time_idx, 2] = logsumexp3(
+            np.array(
+                [
+                    trans_t[2, 0] + rhs[0],
+                    trans_t[2, 1] + rhs[1],
+                    trans_t[2, 2] + rhs[2],
+                ],
+                dtype=np.float64,
+            ),
+        )
     return log_beta
 
 

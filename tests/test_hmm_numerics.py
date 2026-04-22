@@ -6,6 +6,8 @@ import pytest
 from errors import HMMConvergenceError
 from state.ti_hmm_single import (
     gaussian_log_likelihood,
+    logsumexp3,
+    logsumexp_axis3,
     logsumexp_stable,
     shrink_emission_covariance,
     transition_matrix_t,
@@ -19,6 +21,37 @@ def test_logsumexp_stable_handles_large_inputs_without_overflow() -> None:
 
     assert np.isfinite(result)
     assert np.isclose(result, 1001.0 + np.log1p(np.exp(-1.0) + np.exp(-2.0)))
+
+
+def test_logsumexp3_matches_stable_reference() -> None:
+    values = np.array([-7.0, -2.5, -12.0], dtype=np.float64)
+    expected = float(np.log(np.sum(np.exp(values))))
+
+    result = float(logsumexp3(values))
+
+    assert np.isclose(result, expected, rtol=0.0, atol=1e-12)
+
+
+def test_logsumexp_axis3_matches_row_and_column_reductions() -> None:
+    matrix = np.array(
+        [
+            [-5.0, -2.0, -1.0],
+            [-4.0, -3.5, -2.5],
+            [-1.5, -7.0, -3.0],
+        ],
+        dtype=np.float64,
+    )
+    row_expected = np.array([np.log(np.sum(np.exp(row))) for row in matrix], dtype=np.float64)
+    col_expected = np.array(
+        [np.log(np.sum(np.exp(matrix[:, idx]))) for idx in range(matrix.shape[1])],
+        dtype=np.float64,
+    )
+
+    row_result = logsumexp_axis3(matrix, axis=1)
+    col_result = logsumexp_axis3(matrix, axis=0)
+
+    assert np.allclose(row_result, row_expected, rtol=0.0, atol=1e-12)
+    assert np.allclose(col_result, col_expected, rtol=0.0, atol=1e-12)
 
 
 def test_transition_matrix_t_clips_extreme_logits_and_normalizes_rows() -> None:
