@@ -5,12 +5,17 @@ from datetime import date, timedelta
 import json
 from pathlib import Path
 import time
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
 
-from app.backtest_runner import BacktestRunnerDeps, run_backtest_job, write_backtest_jsonl
+from app.backtest_runner import (
+    BacktestRunnerDeps,
+    build_backtest_feature_cache,
+    run_backtest_job,
+    write_backtest_jsonl,
+)
 from config_types import FrozenConfig
 from engine_types import (
     DecisionOutput,
@@ -350,3 +355,38 @@ def test_run_backtest_job_preserves_output_order_with_process_workers(
         "2024-01-12",
         "2024-01-19",
     ]
+
+
+def test_build_backtest_feature_cache_covers_holiday_fridays(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timestamps = np.array(
+        ["2015-06-26", "2015-07-02", "2015-07-10"],
+        dtype="datetime64[D]",
+    )
+    series = {
+        "DGS10": TimeSeries(
+            series_id="DGS10",
+            timestamps=timestamps,
+            values=np.array([1.0, 1.0, 1.0], dtype=np.float64),
+            is_pseudo_pit=False,
+        ),
+        "NASDAQXNDX": TimeSeries(
+            series_id="NASDAQXNDX",
+            timestamps=timestamps,
+            values=np.array([100.0, 101.0, 102.0], dtype=np.float64),
+            is_pseudo_pit=False,
+        ),
+    }
+    monkeypatch.setattr(
+        "app.backtest_runner.build_feature_block",
+        lambda _series, _week: (
+            np.zeros(10, dtype=np.float64),
+            np.zeros(10, dtype=np.bool_),
+        ),
+    )
+
+    cache = build_backtest_feature_cache(series, end=date(2015, 7, 10))
+
+    blocks = cast(Mapping[date, tuple[np.ndarray, np.ndarray]], cache["blocks"])
+    assert date(2015, 7, 3) in blocks

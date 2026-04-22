@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import date, timedelta
 import json
 import multiprocessing
 from pathlib import Path
@@ -33,7 +33,6 @@ from features.block_builder import build_feature_block
 from inference.train import (
     _forward_52w_return,
     _scale_feature_history,
-    _weekly_dates_from_series,
     compute_effective_strict_acceptance_start_from_series,
 )
 from inference.weekly import TrainingArtifacts
@@ -62,6 +61,7 @@ TRAINING_WEEKS_KEY = "training_weeks"
 TRAINING_X_RAW_KEY = "training_x_raw"
 TRAINING_X_SCALED_KEY = "training_x_scaled"
 TRAINING_Y_KEY = "training_y_52w"
+FRIDAY = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,7 +112,7 @@ def build_backtest_feature_cache(
     end: date,
 ) -> Mapping[str, object]:
     """io: Precompute immutable feature/history/training caches for backtest workers."""
-    all_weeks = _weekly_dates_from_series(series, end)
+    all_weeks = _backtest_weeks_from_series(series, end=end)
     blocks = {week: build_feature_block(series, week) for week in all_weeks}
 
     finite_history_weeks = tuple(week for week in all_weeks if not blocks[week][1].any())
@@ -163,6 +163,22 @@ def build_backtest_feature_cache(
         TRAINING_X_SCALED_KEY: training_x_scaled,
         TRAINING_Y_KEY: training_y_52w,
     }
+
+
+def _backtest_weeks_from_series(
+    series: Mapping[str, TimeSeries],
+    *,
+    end: date,
+) -> tuple[date, ...]:
+    timestamps = series["DGS10"].timestamps.astype("datetime64[D]")
+    if timestamps.shape[0] == 0:
+        msg = "backtest feature cache requires at least one DGS10 timestamp"
+        raise ValueError(msg)
+    first_observation = date.fromisoformat(str(timestamps[0]))
+    first_friday = first_observation + timedelta(days=(FRIDAY - first_observation.weekday()) % 7)
+    if first_friday > end:
+        return ()
+    return _weekly_dates(first_friday, end)
 
 
 def write_acceptance_report(
