@@ -751,7 +751,13 @@ def infer_hmm(
     dwell = np.ones((max(y_obs.shape[0] - 1, 0), STATE_COUNT), dtype=np.float64)
     log_transition = _log_transition_matrices(model.transition_coefs, dwell, h[: dwell.shape[0]])
     filtering = log_forward_filter(log_initial, log_transition, log_emission)
-    post = np.exp(filtering.log_alpha[-1])
+    with np.errstate(under="ignore"):
+        post = np.exp(filtering.log_alpha[-1])
+    post_sum = float(np.sum(post))
+    if not np.isfinite(post_sum) or post_sum <= 0.0:
+        msg = "posterior exp underflow produced invalid mass"
+        raise HMMConvergenceError(msg)
+    post = post / post_sum
     state_idx = int(np.argmax(post))
     path = np.argmax(filtering.log_alpha, axis=1)
     dwell_weeks = 1
@@ -788,7 +794,12 @@ def infer_hmm_posterior_path(
     log_transition = _log_transition_matrices(model.transition_coefs, dwell, h[: dwell.shape[0]])
     filtering = log_forward_filter(log_initial, log_transition, log_emission)
     with np.errstate(under="ignore"):
-        return np.exp(filtering.log_alpha)
+        post_path = np.exp(filtering.log_alpha)
+    row_sums = np.sum(post_path, axis=1, keepdims=True)
+    if not np.isfinite(row_sums).all() or np.any(row_sums <= 0.0):
+        msg = "posterior path exp underflow produced invalid mass"
+        raise HMMConvergenceError(msg)
+    return cast(NDArray[np.float64], post_path / row_sums)
 
 
 def _validate_forward_returns(

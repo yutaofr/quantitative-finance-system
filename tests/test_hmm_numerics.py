@@ -8,7 +8,9 @@ from state.ti_hmm_single import (
     _TransitionObjectiveData,
     _transition_objective_grad,
     COV_EPSILON,
+    HMMModel,
     gaussian_log_likelihood,
+    infer_hmm,
     logsumexp3,
     logsumexp_axis3,
     logsumexp_stable,
@@ -193,3 +195,37 @@ def test_gaussian_log_likelihood_ignores_benign_underflow_in_mahalanobis_sum() -
 
     assert log_like.shape == (2,)
     assert np.isfinite(log_like).all()
+
+
+def test_infer_hmm_ignores_benign_underflow_in_posterior_recovery() -> None:
+    covariance = np.stack(
+        [
+            np.diag(np.array([1.0e40] * 6, dtype=np.float64)),
+            np.diag(np.array([1.0e40] * 6, dtype=np.float64)),
+            np.diag(np.array([1.0e40] * 6, dtype=np.float64)),
+        ],
+    )
+    model = HMMModel(
+        transition_coefs=np.zeros((3, 3), dtype=np.float64),
+        emission_mean=np.zeros((3, 6), dtype=np.float64),
+        emission_cov=covariance,
+        label_map={0: "DEFENSIVE", 1: "NEUTRAL", 2: "OFFENSIVE"},
+        log_likelihood=0.0,
+    )
+    y_obs = np.array(
+        [
+            [1.0e-220, -2.0e-220, 3.0e-220, -4.0e-220, 5.0e-220, -6.0e-220],
+            [-2.0e-220, 3.0e-220, -4.0e-220, 5.0e-220, -6.0e-220, 7.0e-220],
+        ],
+        dtype=np.float64,
+    )
+    h = np.array([0.0, 1.0e-220], dtype=np.float64)
+
+    old_settings = np.seterr(all="raise")
+    try:
+        result = infer_hmm(model, y_obs, h)
+    finally:
+        np.seterr(**old_settings)
+
+    assert np.isfinite(result.posterior.post).all()
+    assert np.isclose(np.sum(result.posterior.post), 1.0, atol=1.0e-8)
