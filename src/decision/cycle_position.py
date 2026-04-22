@@ -13,6 +13,8 @@ def _percentile_rank(value: float, distribution: NDArray[np.float64]) -> float:
     if dist.ndim != 1 or dist.shape[0] == 0 or not np.isfinite(dist).all():
         msg = "percentile-rank distribution must be a finite non-empty vector"
         raise ValueError(msg)
+    if not np.isfinite(value):
+        return 0.5
     ordered = np.sort(dist)
     if value <= ordered[0]:
         return 0.0

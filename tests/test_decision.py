@@ -56,3 +56,13 @@ def test_cycle_position_averages_credit_vrp_and_inverted_slope_ranks() -> None:
     }
 
     assert cycle_position(x5_t=2.0, x9_t=0.2, x1_t=0.0, train_dist=train_dist) == 50.0
+
+
+def test_cycle_position_uses_neutral_rank_for_missing_input() -> None:
+    train_dist = {
+        "x5": np.array([1.0, 2.0, 3.0], dtype=np.float64),
+        "x9": np.array([0.1, 0.2, 0.3], dtype=np.float64),
+        "x1": np.array([-1.0, 0.0, 1.0], dtype=np.float64),
+    }
+
+    assert cycle_position(x5_t=float("nan"), x9_t=0.2, x1_t=0.0, train_dist=train_dist) == 50.0
