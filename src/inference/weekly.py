@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -43,6 +43,10 @@ DEFAULT_PREVIOUS_OFFENSE = 50.0
 FEATURE_COUNT = 10
 HMM_OBS_MIN_ROWS = 2
 FRIDAY = 4
+BLOCKS_KEY = "blocks"
+HISTORY_WEEK_ORDINALS_KEY = "history_week_ordinals"
+HISTORY_X_RAW_KEY = "history_x_raw"
+HISTORY_X_SCALED_KEY = "history_x_scaled"
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,10 +184,33 @@ def _feature_history(
     as_of: date,
     feature_cache: Any = None,
 ) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.bool_]]:
+    if isinstance(feature_cache, Mapping) and HISTORY_WEEK_ORDINALS_KEY in feature_cache:
+        week_ordinals = np.asarray(feature_cache[HISTORY_WEEK_ORDINALS_KEY], dtype=np.int64)
+        count = int(np.searchsorted(week_ordinals, as_of.toordinal(), side="right"))
+        if count == 0:
+            return (
+                np.empty((0, FEATURE_COUNT), dtype=np.float64),
+                np.empty((0, FEATURE_COUNT), dtype=np.float64),
+                np.empty((0, FEATURE_COUNT), dtype=np.bool_),
+            )
+        raw_history = np.asarray(feature_cache[HISTORY_X_RAW_KEY], dtype=np.float64)[:count].copy()
+        scaled_history = np.asarray(feature_cache[HISTORY_X_SCALED_KEY], dtype=np.float64)[
+            :count
+        ].copy()
+        return (
+            raw_history,
+            scaled_history,
+            np.zeros((count, FEATURE_COUNT), dtype=np.bool_),
+        )
     rows: list[NDArray[np.float64]] = []
     masks: list[NDArray[np.bool_]] = []
     for week in _weekly_dates_from_series(series, as_of):
-        if feature_cache is not None and week in feature_cache:
+        if isinstance(feature_cache, Mapping) and BLOCKS_KEY in feature_cache:
+            raw, missing = cast(
+                Mapping[date, tuple[NDArray[np.float64], NDArray[np.bool_]]],
+                feature_cache[BLOCKS_KEY],
+            )[week]
+        elif feature_cache is not None and week in feature_cache:
             raw, missing = feature_cache[week]
         else:
             raw, missing = build_feature_block(series, week)
@@ -258,7 +285,12 @@ def run_weekly(  # noqa: PLR0913
 ) -> WeeklyOutput:
     """pure. Assemble one SRD §11 WeeklyOutput from injected PIT data and artifacts."""
     zstats, thresholds, qr_coefs = _require_artifacts(training_artifacts)
-    if feature_cache is not None and as_of in feature_cache:
+    if isinstance(feature_cache, Mapping) and BLOCKS_KEY in feature_cache:
+        raw, missing_mask = cast(
+            Mapping[date, tuple[NDArray[np.float64], NDArray[np.bool_]]],
+            feature_cache[BLOCKS_KEY],
+        )[as_of]
+    elif feature_cache is not None and as_of in feature_cache:
         raw, missing_mask = feature_cache[as_of]
     else:
         raw, missing_mask = build_feature_block(series, as_of)

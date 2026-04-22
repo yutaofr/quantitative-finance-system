@@ -31,6 +31,8 @@ from config_types import FrozenConfig
 from engine_types import TimeSeries, VintageMode, WeeklyOutput
 from features.block_builder import build_feature_block
 from inference.train import (
+    _forward_52w_return,
+    _scale_feature_history,
     _weekly_dates_from_series,
     compute_effective_strict_acceptance_start_from_series,
 )
@@ -51,6 +53,15 @@ InferWeekly = Callable[
 WriteBacktestResult = Callable[[BacktestResult, Path], None]
 
 _WORKER_STATE: dict[str, object] = {}
+BLOCKS_KEY = "blocks"
+HISTORY_WEEK_ORDINALS_KEY = "history_week_ordinals"
+HISTORY_X_RAW_KEY = "history_x_raw"
+HISTORY_X_SCALED_KEY = "history_x_scaled"
+TRAINING_WEEK_ORDINALS_KEY = "training_week_ordinals"
+TRAINING_WEEKS_KEY = "training_weeks"
+TRAINING_X_RAW_KEY = "training_x_raw"
+TRAINING_X_SCALED_KEY = "training_x_scaled"
+TRAINING_Y_KEY = "training_y_52w"
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +106,65 @@ def write_backtest_metadata(path: Path, metadata: BacktestRuntimeMetadata) -> No
     path.write_text(f"{payload}\n", encoding="utf-8")
 
 
+def build_backtest_feature_cache(
+    series: Mapping[str, TimeSeries],
+    *,
+    end: date,
+) -> Mapping[str, object]:
+    """io: Precompute immutable feature/history/training caches for backtest workers."""
+    all_weeks = _weekly_dates_from_series(series, end)
+    blocks = {week: build_feature_block(series, week) for week in all_weeks}
+
+    finite_history_weeks = tuple(week for week in all_weeks if not blocks[week][1].any())
+    if finite_history_weeks:
+        history_x_raw = np.vstack(
+            [blocks[week][0] for week in finite_history_weeks],
+        ).astype(np.float64)
+        history_x_scaled = _scale_feature_history(history_x_raw)
+        history_week_ordinals = np.array(
+            [week.toordinal() for week in finite_history_weeks],
+            dtype=np.int64,
+        )
+    else:
+        history_x_raw = np.empty((0, 10), dtype=np.float64)
+        history_x_scaled = np.empty((0, 10), dtype=np.float64)
+        history_week_ordinals = np.empty(0, dtype=np.int64)
+
+    training_weeks = tuple(
+        week
+        for week in finite_history_weeks
+        if np.isfinite(_forward_52w_return(series["NASDAQXNDX"], week))
+    )
+    if training_weeks:
+        training_x_raw = np.vstack([blocks[week][0] for week in training_weeks]).astype(np.float64)
+        training_x_scaled = _scale_feature_history(training_x_raw)
+        training_y_52w = np.asarray(
+            [_forward_52w_return(series["NASDAQXNDX"], week) for week in training_weeks],
+            dtype=np.float64,
+        )
+        training_week_ordinals = np.array(
+            [week.toordinal() for week in training_weeks],
+            dtype=np.int64,
+        )
+    else:
+        training_x_raw = np.empty((0, 10), dtype=np.float64)
+        training_x_scaled = np.empty((0, 10), dtype=np.float64)
+        training_y_52w = np.empty(0, dtype=np.float64)
+        training_week_ordinals = np.empty(0, dtype=np.int64)
+
+    return {
+        BLOCKS_KEY: blocks,
+        HISTORY_WEEK_ORDINALS_KEY: history_week_ordinals,
+        HISTORY_X_RAW_KEY: history_x_raw,
+        HISTORY_X_SCALED_KEY: history_x_scaled,
+        TRAINING_WEEK_ORDINALS_KEY: training_week_ordinals,
+        TRAINING_WEEKS_KEY: training_weeks,
+        TRAINING_X_RAW_KEY: training_x_raw,
+        TRAINING_X_SCALED_KEY: training_x_scaled,
+        TRAINING_Y_KEY: training_y_52w,
+    }
+
+
 def write_acceptance_report(
     result: BacktestResult,
     cfg: FrozenConfig,
@@ -132,6 +202,23 @@ def _is_process_safe_callable(func: object) -> bool:
     return callable(func) and "<locals>" not in qualname and module not in {"", "__main__"}
 
 
+def _uses_prefetched_backtest_cache(feature_cache: Mapping[str, object] | None) -> bool:
+    if not isinstance(feature_cache, Mapping):
+        return False
+    required_keys = {
+        BLOCKS_KEY,
+        HISTORY_WEEK_ORDINALS_KEY,
+        HISTORY_X_RAW_KEY,
+        HISTORY_X_SCALED_KEY,
+        TRAINING_WEEK_ORDINALS_KEY,
+        TRAINING_WEEKS_KEY,
+        TRAINING_X_RAW_KEY,
+        TRAINING_X_SCALED_KEY,
+        TRAINING_Y_KEY,
+    }
+    return required_keys.issubset(feature_cache.keys())
+
+
 def _configure_process_worker(
     series: Mapping[str, TimeSeries],
     cfg: FrozenConfig,
@@ -164,7 +251,11 @@ def _run_backtest_week(as_of: date) -> WeeklyOutput:
     ):
         msg = "backtest worker state is not initialized"
         raise RuntimeError(msg)
-    history = _slice_series_history(series, as_of)
+    history = (
+        series
+        if _uses_prefetched_backtest_cache(cast(Mapping[str, object] | None, feature_cache))
+        else _slice_series_history(series, as_of)
+    )
     training_artifacts = fit_training_artifacts(as_of, history, cfg, feature_cache)
     return cast(
         WeeklyOutput,
@@ -199,7 +290,7 @@ def _run_walkforward_process_pool(  # noqa: PLR0913
             infer_weekly=infer_weekly,
             feature_cache=feature_cache,
         )
-    context = multiprocessing.get_context("spawn")
+    context = cast(multiprocessing.context.BaseContext, multiprocessing.get_context("spawn"))
     try:
         with ProcessPoolExecutor(
             max_workers=max_workers,
@@ -230,8 +321,7 @@ def run_backtest_job(
     """io: execute walk-forward backtest over PIT-truncated history."""
     vintage_mode: VintageMode = "strict" if end >= cfg.strict_pit_start else "pseudo"
     series = deps.fetch_series(end, vintage_mode)
-    all_weeks = _weekly_dates_from_series(series, end)
-    feature_cache = {week: build_feature_block(series, week) for week in all_weeks}
+    feature_cache = build_backtest_feature_cache(series, end=end)
     effective_start = cfg.strict_pit_start
     if vintage_mode == "strict":
         effective_start = compute_effective_strict_acceptance_start_from_series(
@@ -259,9 +349,18 @@ def run_backtest_job(
             cfg,
             fit_training_artifacts=deps.fit_training_artifacts,
             infer_weekly=deps.infer_weekly,
-            feature_cache=feature_cache,
+            feature_cache=cast(Mapping[date, Any], feature_cache),
             max_workers=deps.max_workers,
         )
+    elif _uses_prefetched_backtest_cache(cast(Mapping[str, object] | None, feature_cache)):
+        outputs = _run_backtest_week_direct(
+            _weekly_dates(run_start, end),
+            series,
+            cfg,
+            deps,
+            cast(Mapping[date, Any], feature_cache),
+        )
+        result = BacktestResult(outputs=outputs)
     else:
         result = run_walkforward(
             run_start,
@@ -270,7 +369,7 @@ def run_backtest_job(
             cfg,
             fit_training_artifacts=deps.fit_training_artifacts,
             infer_weekly=deps.infer_weekly,
-            feature_cache=feature_cache,
+            feature_cache=cast(Mapping[date, Any], feature_cache),
         )
     target_series = series.get("NASDAQXNDX")
     if target_series is None:
@@ -292,3 +391,17 @@ def run_backtest_job(
         effective_start,
     )
     return EXIT_OK if passed else EXIT_ACCEPTANCE_FAILED
+
+
+def _run_backtest_week_direct(
+    weeks: tuple[date, ...],
+    series: Mapping[str, TimeSeries],
+    cfg: FrozenConfig,
+    deps: BacktestRunnerDeps,
+    feature_cache: Mapping[date, Any],
+) -> tuple[WeeklyOutput, ...]:
+    outputs: list[WeeklyOutput] = []
+    for as_of in weeks:
+        training_artifacts = deps.fit_training_artifacts(as_of, series, cfg, feature_cache)
+        outputs.append(deps.infer_weekly(as_of, cfg, series, training_artifacts, feature_cache))
+    return tuple(outputs)

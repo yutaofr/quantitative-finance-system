@@ -171,6 +171,9 @@ def build_backtest_runner_deps(
     train_deps = build_train_runner_deps(
         secrets, cache_root=cache_root, nasdaq_cache_root=nasdaq_cache_root
     )
+    max_workers = int(os.environ.get("BACKTEST_MAX_WORKERS", "0") or "0")
+    if max_workers <= 0:
+        max_workers = max(1, min(os.cpu_count() or 1, 4))
 
     def write_result(result: BacktestResult, path: Path) -> None:
         write_backtest_jsonl(result, path)
@@ -180,5 +183,5 @@ def build_backtest_runner_deps(
         fit_training_artifacts=fit_backtest_training_artifacts,
         infer_weekly=infer_backtest_weekly,
         write_result=write_result,
-        max_workers=max(1, min(os.cpu_count() or 1, 4)),
+        max_workers=max_workers,
     )

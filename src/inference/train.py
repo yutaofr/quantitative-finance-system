@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -22,7 +22,12 @@ from inference.weekly import FULL_TAUS, TrainingArtifacts
 from law.linear_quantiles import QRCoefs, fit_linear_quantiles, predict_interior
 from law.quantile_moments import moments_from_quantiles
 from law.tail_extrapolation import extrapolate_tails
-from state.ti_hmm_single import HMMModel, degraded_hmm_posterior, fit_hmm, infer_hmm
+from state.ti_hmm_single import (
+    HMMModel,
+    degraded_hmm_posterior,
+    fit_hmm,
+    infer_hmm_posterior_path,
+)
 
 FORECAST_HORIZON_WEEKS = 52
 TRAINING_EMBARGO_WEEKS = 53
@@ -37,6 +42,12 @@ DEFAULT_LABEL_MAP: Mapping[int, Stance] = {
     1: "NEUTRAL",
     2: "OFFENSIVE",
 }
+BLOCKS_KEY = "blocks"
+TRAINING_WEEK_ORDINALS_KEY = "training_week_ordinals"
+TRAINING_WEEKS_KEY = "training_weeks"
+TRAINING_X_RAW_KEY = "training_x_raw"
+TRAINING_X_SCALED_KEY = "training_x_scaled"
+TRAINING_Y_KEY = "training_y_52w"
 
 FitHMM = Callable[
     [NDArray[np.float64], NDArray[np.float64], np.random.Generator],
@@ -112,19 +123,40 @@ def _training_matrix(
         msg = "training requires NASDAQXNDX to compute 52-week forward returns"
         raise ValueError(msg)
     train_end = as_of - timedelta(weeks=TRAINING_EMBARGO_WEEKS)
+    if isinstance(feature_cache, Mapping) and TRAINING_WEEK_ORDINALS_KEY in feature_cache:
+        week_ordinals = np.asarray(feature_cache[TRAINING_WEEK_ORDINALS_KEY], dtype=np.int64)
+        count = int(np.searchsorted(week_ordinals, train_end.toordinal(), side="right"))
+        if count < min_training_weeks:
+            msg = "not enough finite training weeks after PIT cutoff"
+            raise ValueError(msg)
+        training_weeks = cast(tuple[date, ...], feature_cache[TRAINING_WEEKS_KEY])
+        x_raw = np.asarray(feature_cache[TRAINING_X_RAW_KEY], dtype=np.float64)[:count].copy()
+        x_scaled = np.asarray(feature_cache[TRAINING_X_SCALED_KEY], dtype=np.float64)[:count].copy()
+        y_52w = np.asarray(feature_cache[TRAINING_Y_KEY], dtype=np.float64)[:count].copy()
+        return _TrainingMatrix(
+            dates=training_weeks[:count],
+            x_raw=x_raw,
+            x_scaled=x_scaled,
+            y_52w=y_52w,
+        )
     rows: list[NDArray[np.float64]] = []
     targets: list[float] = []
     dates: list[date] = []
     for week in _weekly_dates_from_series(series, train_end):
-        if feature_cache is not None and week in feature_cache:
+        if isinstance(feature_cache, Mapping) and BLOCKS_KEY in feature_cache:
+            raw, missing = cast(
+                Mapping[date, tuple[NDArray[np.float64], NDArray[np.bool_]]],
+                feature_cache[BLOCKS_KEY],
+            )[week]
+        elif feature_cache is not None and week in feature_cache:
             raw, missing = feature_cache[week]
         else:
             raw, missing = build_feature_block(series, week)
-        y_52w = _forward_52w_return(series["NASDAQXNDX"], week)
-        if not missing.any() and np.isfinite(y_52w):
+        target_52w = float(_forward_52w_return(series["NASDAQXNDX"], week))
+        if not missing.any() and np.isfinite(target_52w):
             dates.append(week)
             rows.append(raw)
-            targets.append(y_52w)
+            targets.append(target_52w)
     if len(rows) < min_training_weeks:
         msg = "not enough finite training weeks after PIT cutoff"
         raise ValueError(msg)
@@ -180,13 +212,10 @@ def _posterior_training_path(
 ) -> NDArray[np.float64]:
     if hmm_model is None:
         return np.tile(degraded_hmm_posterior().post, (y_obs.shape[0], 1))
-    rows: list[NDArray[np.float64]] = []
-    for end_idx in range(1, y_obs.shape[0] + 1):
-        try:
-            rows.append(infer_hmm(hmm_model, y_obs[:end_idx], h[:end_idx]).posterior.post)
-        except (HMMConvergenceError, ValueError):
-            rows.append(degraded_hmm_posterior().post)
-    return np.vstack(rows)
+    try:
+        return infer_hmm_posterior_path(hmm_model, y_obs, h)
+    except (HMMConvergenceError, ValueError):
+        return np.tile(degraded_hmm_posterior().post, (y_obs.shape[0], 1))
 
 
 def _mad(values: NDArray[np.float64]) -> float:
@@ -276,8 +305,16 @@ def compute_effective_strict_acceptance_start_from_series(
     all_weeks = _weekly_dates_from_series(series, date(2099, 12, 31))
     valid_weeks: list[date] = []
     missing_dict: dict[date, bool] = {}
+    block_cache: Mapping[date, tuple[NDArray[np.float64], NDArray[np.bool_]]] | None = None
+    if isinstance(feature_cache, Mapping) and BLOCKS_KEY in feature_cache:
+        block_cache = cast(
+            Mapping[date, tuple[NDArray[np.float64], NDArray[np.bool_]]],
+            feature_cache[BLOCKS_KEY],
+        )
     for week in all_weeks:
-        if feature_cache is not None and week in feature_cache:
+        if block_cache is not None:
+            _raw, missing = block_cache[week]
+        elif feature_cache is not None and week in feature_cache:
             _raw, missing = feature_cache[week]
         else:
             _raw, missing = build_feature_block(series, week)

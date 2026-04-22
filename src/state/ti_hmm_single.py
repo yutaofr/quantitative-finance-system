@@ -618,6 +618,27 @@ def infer_hmm(
     )
 
 
+def infer_hmm_posterior_path(
+    model: HMMModel,
+    y_obs_history: NDArray[np.float64],
+    h_history: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """pure. Return the filtered posterior path for every prefix of the observation history."""
+    if set(model.label_map) != set(range(STATE_COUNT)):
+        msg = "HMM label_map must contain all hidden states"
+        raise HMMConvergenceError(msg)
+    y_obs = np.asarray(y_obs_history, dtype=np.float64)
+    h = np.asarray(h_history, dtype=np.float64)
+    _validate_fit_inputs(y_obs, h)
+    log_initial = np.log(np.full(STATE_COUNT, 1.0 / float(STATE_COUNT), dtype=np.float64))
+    log_emission = _log_emission_matrix(y_obs, model.emission_mean, model.emission_cov)
+    dwell = np.ones((max(y_obs.shape[0] - 1, 0), STATE_COUNT), dtype=np.float64)
+    log_transition = _log_transition_matrices(model.transition_coefs, dwell, h[: dwell.shape[0]])
+    filtering = log_forward_filter(log_initial, log_transition, log_emission)
+    with np.errstate(under="ignore"):
+        return np.exp(filtering.log_alpha)
+
+
 def _validate_forward_returns(
     forward_52w_returns: NDArray[np.float64] | None,
     n_obs: int,
