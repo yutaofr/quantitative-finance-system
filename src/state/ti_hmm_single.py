@@ -296,17 +296,22 @@ def shrink_emission_covariance(
         mean = np.sum(obs * w[:, None], axis=0) / weight_sum
     centered = obs - mean
     with np.errstate(under="ignore"):
-        sample_cov = (centered * w[:, None]).T @ centered / weight_sum
+        sqrt_w = np.sqrt(w)
+        weighted_centered = centered * sqrt_w[:, None]
+        sample_cov = weighted_centered.T @ weighted_centered / weight_sum
     target = np.diag(np.diag(sample_cov))
     diff = sample_cov - target
-    shrink_den = float(np.sum(diff * diff))
+    with np.errstate(under="ignore"):
+        shrink_den = float(np.sum(diff * diff))
     if shrink_den == 0.0:
         shrunk = target
     else:
         outer = np.einsum("ni,nj->nij", centered, centered)
         noise = outer - sample_cov
         with np.errstate(under="ignore"):
-            shrink_num = float(np.sum((noise * w[:, None, None]) ** 2)) / (weight_sum * weight_sum)
+            noise_sq = np.sum(noise * noise, axis=(1, 2))
+            w_sq = w * w
+            shrink_num = float(np.sum(w_sq * noise_sq)) / (weight_sum * weight_sum)
         shrinkage = float(np.clip(shrink_num / shrink_den, 0.0, 1.0))
         shrunk = (1.0 - shrinkage) * sample_cov + shrinkage * target
     return shrunk + epsilon * np.eye(obs.shape[1], dtype=np.float64)
@@ -338,7 +343,8 @@ def gaussian_log_likelihood(
 
     centered = (obs - mu).T
     solved = np.linalg.solve(chol, centered)
-    mahalanobis = np.sum(solved * solved, axis=0)
+    with np.errstate(under="ignore"):
+        mahalanobis = np.sum(solved * solved, axis=0)
     log_det = 2.0 * float(np.sum(np.log(np.diag(chol))))
     dim = float(mu.shape[0])
     return cast(NDArray[np.float64], -0.5 * (dim * GAUSSIAN_LOG_NORM + log_det + mahalanobis))

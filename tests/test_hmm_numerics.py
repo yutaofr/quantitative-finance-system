@@ -7,6 +7,7 @@ from errors import HMMConvergenceError
 from state.ti_hmm_single import (
     _TransitionObjectiveData,
     _transition_objective_grad,
+    COV_EPSILON,
     gaussian_log_likelihood,
     logsumexp3,
     logsumexp_axis3,
@@ -125,6 +126,28 @@ def test_shrink_emission_covariance_ignores_underflow_from_tiny_weights() -> Non
     assert np.isfinite(cov).all()
 
 
+def test_shrink_emission_covariance_remains_finite_and_psd_for_tiny_weights() -> None:
+    observations = np.array(
+        [
+            [1.0e-200, -2.0e-200],
+            [2.0e-200, 3.0e-200],
+            [-3.0e-200, 4.0e-200],
+        ],
+        dtype=np.float64,
+    )
+    weights = np.array([1.0e-220, 2.0e-220, 3.0e-220], dtype=np.float64)
+
+    old_settings = np.seterr(all="raise")
+    try:
+        cov = shrink_emission_covariance(observations, weights)
+    finally:
+        np.seterr(**old_settings)
+
+    assert np.isfinite(cov).all()
+    assert np.allclose(cov, cov.T, rtol=0.0, atol=1.0e-18)
+    assert np.all(np.diag(cov) >= COV_EPSILON)
+
+
 def test_gaussian_log_likelihood_uses_cholesky_and_rejects_singular_covariance() -> None:
     observations = np.array([[0.0, 0.0], [1.0, 1.0]], dtype=np.float64)
     mean = np.array([0.0, 0.0], dtype=np.float64)
@@ -140,6 +163,33 @@ def test_gaussian_log_likelihood_returns_finite_values_for_regularized_covarianc
     cov = np.array([[1.0, 0.2], [0.2, 1.5]], dtype=np.float64)
 
     log_like = gaussian_log_likelihood(observations, mean, cov)
+
+    assert log_like.shape == (2,)
+    assert np.isfinite(log_like).all()
+
+
+def test_gaussian_log_likelihood_ignores_benign_underflow_in_mahalanobis_sum() -> None:
+    observations = np.array(
+        [
+            [1.0e-220, -2.0e-220],
+            [-3.0e-220, 4.0e-220],
+        ],
+        dtype=np.float64,
+    )
+    mean = np.zeros(2, dtype=np.float64)
+    cov = np.array(
+        [
+            [1.0e40, 0.0],
+            [0.0, 1.0e40],
+        ],
+        dtype=np.float64,
+    )
+
+    old_settings = np.seterr(all="raise")
+    try:
+        log_like = gaussian_log_likelihood(observations, mean, cov)
+    finally:
+        np.seterr(**old_settings)
 
     assert log_like.shape == (2,)
     assert np.isfinite(log_like).all()

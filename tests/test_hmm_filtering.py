@@ -86,3 +86,38 @@ def test_infer_hmm_posterior_path_is_finite_and_row_normalized() -> None:
     assert posterior_path.shape == (3, 3)
     assert np.isfinite(posterior_path).all()
     assert np.allclose(posterior_path.sum(axis=1), np.ones(3, dtype=np.float64), atol=1e-8)
+
+
+def test_infer_hmm_posterior_path_ignores_benign_underflow_in_gaussian_log_likelihood() -> None:
+    covariance = np.stack(
+        [
+            np.diag(np.array([1.0e40] * 6, dtype=np.float64)),
+            np.diag(np.array([1.0e40] * 6, dtype=np.float64)),
+            np.diag(np.array([1.0e40] * 6, dtype=np.float64)),
+        ],
+    )
+    model = HMMModel(
+        transition_coefs=np.zeros((3, 3), dtype=np.float64),
+        emission_mean=np.zeros((3, 6), dtype=np.float64),
+        emission_cov=covariance,
+        label_map={0: "DEFENSIVE", 1: "NEUTRAL", 2: "OFFENSIVE"},
+        log_likelihood=0.0,
+    )
+    y_obs = np.array(
+        [
+            [1.0e-220, -2.0e-220, 3.0e-220, -4.0e-220, 5.0e-220, -6.0e-220],
+            [-2.0e-220, 3.0e-220, -4.0e-220, 5.0e-220, -6.0e-220, 7.0e-220],
+        ],
+        dtype=np.float64,
+    )
+    h = np.array([0.0, 1.0e-220], dtype=np.float64)
+
+    old_settings = np.seterr(all="raise")
+    try:
+        posterior_path = infer_hmm_posterior_path(model, y_obs, h)
+    finally:
+        np.seterr(**old_settings)
+
+    assert posterior_path.shape == (2, 3)
+    assert np.isfinite(posterior_path).all()
+    assert np.allclose(posterior_path.sum(axis=1), np.ones(2, dtype=np.float64), atol=1e-8)

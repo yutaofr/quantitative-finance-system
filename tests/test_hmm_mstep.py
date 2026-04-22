@@ -84,6 +84,40 @@ def test_update_emission_parameters_ignores_underflow_from_tiny_state_weights() 
     assert np.isfinite(means[1:]).all()
 
 
+def test_update_emission_parameters_hard_case_tiny_gamma_returns_finite_covariance() -> None:
+    y_obs = np.array(
+        [
+            [1.0e-200, 2.0e-200],
+            [2.0e-200, -3.0e-200],
+            [-4.0e-200, 5.0e-200],
+            [3.0e-200, -1.0e-200],
+        ],
+        dtype=np.float64,
+    )
+    gamma = np.array(
+        [
+            [1.0e-220, 2.0e-220, 3.0e-220],
+            [2.0e-220, 3.0e-220, 4.0e-220],
+            [3.0e-220, 4.0e-220, 5.0e-220],
+            [4.0e-220, 5.0e-220, 6.0e-220],
+        ],
+        dtype=np.float64,
+    )
+    parameter_mask = np.ones(4, dtype=np.bool_)
+
+    old_settings = np.seterr(all="raise")
+    try:
+        means, covs = update_emission_parameters(y_obs, gamma, parameter_mask)
+    finally:
+        np.seterr(**old_settings)
+
+    assert np.isfinite(means).all()
+    assert np.isfinite(covs).all()
+    for cov in covs:
+        assert np.allclose(cov, cov.T, rtol=0.0, atol=1.0e-18)
+        np.linalg.cholesky(cov)
+
+
 def test_fit_transition_coefs_prefers_staying_when_xi_stays() -> None:
     xi = np.zeros((8, 3, 3), dtype=np.float64)
     for time_idx in range(xi.shape[0]):
