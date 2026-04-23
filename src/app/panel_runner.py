@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import date, timedelta
 from functools import partial
@@ -348,7 +348,8 @@ def _panel_worker_count(total_weeks: int) -> int:
             parsed = 0
         if parsed > 0:
             return min(total_weeks, parsed)
-    return 1
+    cpu = os.cpu_count() or 1
+    return min(total_weeks, max(1, cpu))
 
 
 def _evaluate_panel_week(
@@ -526,7 +527,7 @@ def run_panel_backtest_job(  # noqa: PLR0912, PLR0915
     if worker_count == 1:
         week_results = [worker(as_of) for as_of in eval_dates]
     else:
-        with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        with ProcessPoolExecutor(max_workers=worker_count) as executor:
             week_results = list(executor.map(worker, eval_dates))
 
     for week_index, week_result in enumerate(week_results):

@@ -5,8 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
-from types import MappingProxyType
-from typing import cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -300,17 +298,14 @@ def build_panel_feature_block(
         feature_dates=weeks,
         x_macro_raw=x_macro_raw,
         x_macro=x_macro,
-        x_micro_raw=cast(Mapping[str, NDArray[np.float64]], MappingProxyType(x_micro_raw)),
-        x_micro=cast(Mapping[str, NDArray[np.float64]], MappingProxyType(x_micro)),
+        x_micro_raw=dict(x_micro_raw),
+        x_micro=dict(x_micro),
         macro_mask=macro_mask,
-        micro_mask=cast(Mapping[str, NDArray[np.bool_]], MappingProxyType(micro_mask)),
-        asset_availability=cast(Mapping[str, NDArray[np.bool_]], MappingProxyType(availability)),
-        micro_feature_mode=cast(
-            Mapping[str, tuple[str, ...]],
-            MappingProxyType(micro_feature_mode),
-        ),
+        micro_mask=dict(micro_mask),
+        asset_availability=dict(availability),
+        micro_feature_mode=dict(micro_feature_mode),
         available_assets=available_assets,
-        target_returns=cast(Mapping[str, NDArray[np.float64]], MappingProxyType(target_returns)),
+        target_returns=dict(target_returns),
     )
 
 
