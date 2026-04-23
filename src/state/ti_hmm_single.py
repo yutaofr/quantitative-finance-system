@@ -41,6 +41,9 @@ class HMMModel:
     emission_cov: NDArray[np.float64]
     label_map: Mapping[int, Stance]
     log_likelihood: float
+    best_restart_index: int = -1
+    warm_start_was_best: bool = False
+    warm_start_failed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -840,15 +843,27 @@ def _run_hmm_restart(
     data: _FitData,
     generator: np.random.Generator,
     config: _FitConfig,
+    *,
+    warm_start_params: tuple[
+        NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]
+    ]
+    | None = None,
 ) -> HMMModel:
-    means = initialize_emission_means_kmeans_pp(
-        data.y_obs,
-        generator,
-        usable_mask=data.parameter_mask,
-    )
-    gamma = _soft_assign_to_means(data.y_obs, means)
-    means, covs = update_emission_parameters(data.y_obs, gamma, data.parameter_mask)
-    transition_coefs = np.zeros((STATE_COUNT, STATE_COUNT), dtype=np.float64)
+    """pure. Run one EM restart. If warm_start_params provided, skip KMeans++ init."""
+    if warm_start_params is not None:
+        means = warm_start_params[0].copy()
+        covs = warm_start_params[1].copy()
+        transition_coefs = warm_start_params[2].copy()
+        gamma = _soft_assign_to_means(data.y_obs, means)
+    else:
+        means = initialize_emission_means_kmeans_pp(
+            data.y_obs,
+            generator,
+            usable_mask=data.parameter_mask,
+        )
+        gamma = _soft_assign_to_means(data.y_obs, means)
+        means, covs = update_emission_parameters(data.y_obs, gamma, data.parameter_mask)
+        transition_coefs = np.zeros((STATE_COUNT, STATE_COUNT), dtype=np.float64)
     previous_log_likelihood = -np.inf
 
     for _iteration in range(config.max_iter):
@@ -965,8 +980,14 @@ def fit_hmm(  # noqa: PLR0913
     restarts: int = DEFAULT_RESTARTS,
     forward_52w_returns: NDArray[np.float64] | None = None,
     transition_max_iter: int = DEFAULT_OPTIMIZER_MAX_ITER,
+    warm_start_model: HMMModel | None = None,
 ) -> HMMModel:
-    """pure. Fit TI-HMM deterministically for given inputs and injected rng."""
+    """pure. Fit TI-HMM deterministically for given inputs and injected rng.
+
+    When warm_start_model is provided, restart 0 uses its emission/transition
+    parameters as initialization. Restarts 1..N-1 remain random KMeans++.
+    The best log-likelihood across all restarts is returned.
+    """
     generator = _require_generator(rng)
     _validate_fit_inputs(y_obs, h)
     if max_iter <= 0:
@@ -995,14 +1016,31 @@ def fit_hmm(  # noqa: PLR0913
 
     best_model: HMMModel | None = None
     best_log_likelihood = -np.inf
+    best_restart_index = -1
+    warm_start_failed = False
     last_error: Exception | None = None
-    for _ in range(restarts):
+    for restart_idx in range(restarts):
         try:
-            candidate = _run_hmm_restart(data, generator, config)
+            if restart_idx == 0 and warm_start_model is not None:
+                candidate = _run_hmm_restart(
+                    data,
+                    generator,
+                    config,
+                    warm_start_params=(
+                        warm_start_model.emission_mean,
+                        warm_start_model.emission_cov,
+                        warm_start_model.transition_coefs,
+                    ),
+                )
+            else:
+                candidate = _run_hmm_restart(data, generator, config)
             if candidate.log_likelihood > best_log_likelihood:
                 best_model = candidate
                 best_log_likelihood = candidate.log_likelihood
+                best_restart_index = restart_idx
         except (HMMConvergenceError, ValueError) as exc:
+            if restart_idx == 0 and warm_start_model is not None:
+                warm_start_failed = True
             last_error = exc
             continue
 
@@ -1012,4 +1050,15 @@ def fit_hmm(  # noqa: PLR0913
             raise HMMConvergenceError(msg) from last_error
         msg = "HMM EM did not converge in any restart"
         raise HMMConvergenceError(msg)
-    return best_model
+    return HMMModel(
+        transition_coefs=best_model.transition_coefs,
+        emission_mean=best_model.emission_mean,
+        emission_cov=best_model.emission_cov,
+        label_map=best_model.label_map,
+        log_likelihood=best_model.log_likelihood,
+        best_restart_index=best_restart_index,
+        warm_start_was_best=(
+            best_restart_index == 0 and warm_start_model is not None and not warm_start_failed
+        ),
+        warm_start_failed=warm_start_failed,
+    )

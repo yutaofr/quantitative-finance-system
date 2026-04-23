@@ -50,3 +50,4 @@ notebooks/**/.ipynb_checkpoints/
 
 # Docker
 docker-compose.override.yml
+artifacts/panel_challenger/

@@ -8,6 +8,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import date, timedelta
 import os
+import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -93,6 +94,34 @@ class PanelAssetWeekResult:
 
 
 @dataclass(frozen=True, slots=True)
+class PanelFitArtifact:
+    """pure. Per-refit training telemetry for observability."""
+
+    as_of: date
+    train_end: date
+    n_train_rows: int
+    hmm_fit_attempted: bool
+    hmm_status: str
+    hmm_restarts: int
+    hmm_max_iter: int
+    hmm_best_log_likelihood: float | None
+    panel_qr_fit_attempted: bool
+    panel_solver_status: str
+    qr_objective_value: float | None
+    fallback_used: bool
+    total_wall_clock_seconds: float
+    hmm_wall_clock_seconds: float
+    qr_wall_clock_seconds: float
+    predict_wall_clock_seconds: float
+    n_hmm_obs_rows: int
+    warm_start_used: bool
+    warm_start_source_as_of: date | None
+    best_restart_index: int
+    best_restart_was_warm_start: bool
+    warm_start_failure: bool
+
+
+@dataclass(frozen=True, slots=True)
 class PanelWeekResult:
     """pure. One fitted panel week before sequential baseline assembly."""
 
@@ -105,6 +134,7 @@ class PanelWeekResult:
     hmm_status: str
     label_map: Mapping[int, Stance] | None
     asset_results: Mapping[str, PanelAssetWeekResult]
+    fit_artifact: PanelFitArtifact
 
 
 def _panel_root(artifacts_root: Path) -> Path:
@@ -296,9 +326,13 @@ def _fit_panel_training_state(
     train_frame: PanelFeatureFrame,
     macro_series: Mapping[str, TimeSeries],
     rng: np.random.Generator,
+    *,
+    warm_start_model: HMMModel | None = None,
 ) -> tuple[HMMModel | None, PanelHMMInputs | None, NDArray[np.float64], str]:
     try:
-        hmm_model = fit_panel_hmm(train_frame, macro_series, rng)
+        hmm_model = fit_panel_hmm(
+            train_frame, macro_series, rng, warm_start_model=warm_start_model,
+        )
         hmm_inputs = build_panel_hmm_inputs(train_frame, macro_series)
         posterior_path = infer_hmm_posterior_path(hmm_model, hmm_inputs.y_obs, hmm_inputs.h)
         return hmm_model, hmm_inputs, posterior_path, "ok"
@@ -375,14 +409,47 @@ def _init_panel_worker(
     _WORKER_STATE["config"] = panel_config
 
 
-def _panel_worker_task(as_of: date) -> PanelWeekResult:
-    """io: Per-task entry point that reads shared state from module-level dict."""
-    return _evaluate_panel_week(
-        as_of,
-        panel_frame=_WORKER_STATE["frame"],
-        macro_series=_WORKER_STATE["macro"],
-        panel_config=_WORKER_STATE["config"],
-    )
+def _run_chunk_sequential(
+    chunk: tuple[date, ...],
+) -> list[PanelWeekResult]:
+    """io: Process a chunk of dates sequentially, passing warm-start between weeks."""
+    frame: PanelFeatureFrame = _WORKER_STATE["frame"]
+    macro: Mapping[str, TimeSeries] = _WORKER_STATE["macro"]
+    config: Mapping[str, object] = _WORKER_STATE["config"]
+    results: list[PanelWeekResult] = []
+    prev_as_of: date | None = None
+    for as_of in chunk:
+        # _WORKER_STATE["_last_hmm_model"] is set by _evaluate_panel_week
+        prev_model: HMMModel | None = _WORKER_STATE.get("_last_hmm_model")
+        result = _evaluate_panel_week(
+            as_of,
+            panel_frame=frame,
+            macro_series=macro,
+            panel_config=config,
+            warm_start_model=prev_model,
+            warm_start_source_as_of=prev_as_of,
+        )
+        # Reset warm-start chain if this week failed
+        if result.fit_artifact.hmm_status != "ok":
+            _WORKER_STATE["_last_hmm_model"] = None
+            prev_as_of = None
+        else:
+            prev_as_of = as_of
+        results.append(result)
+    return results
+
+
+def _split_into_chunks(
+    items: tuple[date, ...], n_chunks: int,
+) -> list[tuple[date, ...]]:
+    """pure. Split items into n_chunks contiguous chunks for sequential processing."""
+    if n_chunks <= 0:
+        return [items]
+    chunk_size = max(1, (len(items) + n_chunks - 1) // n_chunks)
+    return [
+        tuple(items[i : i + chunk_size])
+        for i in range(0, len(items), chunk_size)
+    ]
 
 
 def _evaluate_panel_week(
@@ -391,19 +458,43 @@ def _evaluate_panel_week(
     panel_frame: PanelFeatureFrame,
     macro_series: Mapping[str, TimeSeries],
     panel_config: Mapping[str, object],
+    warm_start_model: HMMModel | None = None,
+    warm_start_source_as_of: date | None = None,
 ) -> PanelWeekResult:
-    train_frame = _slice_frame(
-        panel_frame,
-        as_of - timedelta(weeks=_config_int(panel_config, "embargo_weeks")),
-    )
+    t_total_start = time.perf_counter()
+    train_end = as_of - timedelta(weeks=_config_int(panel_config, "embargo_weeks"))
+    train_frame = _slice_frame(panel_frame, train_end)
     history_frame = _slice_frame(panel_frame, as_of)
+    n_train_rows = len(train_frame.feature_dates)
     rng = np.random.default_rng(8675309 + as_of.toordinal())
+
+    # ── HMM fit ──
+    t_hmm_start = time.perf_counter()
     hmm_model, hmm_inputs, posterior_path, hmm_status = _fit_panel_training_state(
         train_frame,
         macro_series,
         rng,
+        warm_start_model=warm_start_model,
     )
+    t_hmm_end = time.perf_counter()
+    hmm_best_ll = hmm_model.log_likelihood if hmm_model is not None else None
+    n_hmm_obs = hmm_inputs.y_obs.shape[0] if hmm_inputs is not None else 0
+
+    # Store fitted model for warm-start chain
+    _WORKER_STATE["_last_hmm_model"] = hmm_model
+
+    # Extract warm-start metadata from fitted model
+    ws_used = warm_start_model is not None
+    best_ri = hmm_model.best_restart_index if hmm_model is not None else -1
+    ws_was_best = hmm_model.warm_start_was_best if hmm_model is not None else False
+    ws_failure = hmm_model.warm_start_failed if hmm_model is not None else False
+
     label_map = hmm_model.label_map if hmm_model is not None else None
+    qr_objective: float | None = None
+    fallback_used = False
+
+    # ── QR fit ──
+    t_qr_start = time.perf_counter()
     if hmm_inputs is None or posterior_path.shape[0] == 0:
         common_post, state_name, dwell_weeks, hazard_covariate = _current_hmm_state(
             history_frame,
@@ -412,6 +503,7 @@ def _evaluate_panel_week(
         )
         qr_coefs = None
         panel_solver_status = "per_asset_fallback"
+        fallback_used = True
     else:
         train_obs_rows = [
             _row_index(train_frame, obs_date) for obs_date in hmm_inputs.observation_dates
@@ -447,12 +539,16 @@ def _evaluate_panel_week(
         except QuantileSolverError:
             qr_coefs = None
             panel_solver_status = "per_asset_fallback"
+            fallback_used = True
         common_post, state_name, dwell_weeks, hazard_covariate = _current_hmm_state(
             history_frame,
             macro_series,
             hmm_model,
         )
+    t_qr_end = time.perf_counter()
 
+    # ── Predict + tail ──
+    t_predict_start = time.perf_counter()
     row_idx = _row_index(history_frame, as_of)
     asset_results: dict[str, PanelAssetWeekResult] = {}
     for asset_id in PANEL_REGISTRY:
@@ -494,6 +590,33 @@ def _evaluate_panel_week(
             tail_status=tail_status,
             moments=moments,
         )
+    t_predict_end = time.perf_counter()
+    t_total_end = time.perf_counter()
+
+    fit_artifact = PanelFitArtifact(
+        as_of=as_of,
+        train_end=train_end,
+        n_train_rows=n_train_rows,
+        hmm_fit_attempted=True,
+        hmm_status=hmm_status,
+        hmm_restarts=50,
+        hmm_max_iter=200,
+        hmm_best_log_likelihood=hmm_best_ll,
+        panel_qr_fit_attempted=not fallback_used,
+        panel_solver_status=panel_solver_status,
+        qr_objective_value=qr_objective,
+        fallback_used=fallback_used,
+        total_wall_clock_seconds=t_total_end - t_total_start,
+        hmm_wall_clock_seconds=t_hmm_end - t_hmm_start,
+        qr_wall_clock_seconds=t_qr_end - t_qr_start,
+        predict_wall_clock_seconds=t_predict_end - t_predict_start,
+        n_hmm_obs_rows=n_hmm_obs,
+        warm_start_used=ws_used,
+        warm_start_source_as_of=warm_start_source_as_of,
+        best_restart_index=best_ri,
+        best_restart_was_warm_start=ws_was_best,
+        warm_start_failure=ws_failure,
+    )
 
     return PanelWeekResult(
         as_of=as_of,
@@ -505,6 +628,7 @@ def _evaluate_panel_week(
         hmm_status=hmm_status,
         label_map=label_map,
         asset_results=asset_results,
+        fit_artifact=fit_artifact,
     )
 
 
@@ -552,22 +676,21 @@ def run_panel_backtest_job(  # noqa: PLR0912, PLR0915
 
     worker_count = _panel_worker_count(len(eval_dates))
     if worker_count == 1:
-        week_results = [
-            _evaluate_panel_week(
-                as_of,
-                panel_frame=panel_frame,
-                macro_series=macro_series,
-                panel_config=panel_config,
-            )
-            for as_of in eval_dates
-        ]
+        # Single-worker sequential with warm-start
+        _WORKER_STATE["frame"] = panel_frame
+        _WORKER_STATE["macro"] = macro_series
+        _WORKER_STATE["config"] = panel_config
+        _WORKER_STATE["_last_hmm_model"] = None
+        week_results = _run_chunk_sequential(eval_dates)
     else:
+        chunks = _split_into_chunks(eval_dates, worker_count)
         with ProcessPoolExecutor(
             max_workers=worker_count,
             initializer=_init_panel_worker,
             initargs=(panel_frame, macro_series, panel_config),
         ) as executor:
-            week_results = list(executor.map(_panel_worker_task, eval_dates))
+            chunk_results = list(executor.map(_run_chunk_sequential, chunks))
+        week_results = [r for chunk in chunk_results for r in chunk]
 
     for week_index, week_result in enumerate(week_results):
         if week_result.label_map is not None:
@@ -681,6 +804,42 @@ def run_panel_backtest_job(  # noqa: PLR0912, PLR0915
         }
         all_output_finite = all_output_finite and _payload_is_finite(payload)
         deps.write_json(_panel_week_path(artifacts_root, week_result.as_of), payload)
+        # Write per-refit training telemetry
+        fa = week_result.fit_artifact
+        fit_artifact_payload: dict[str, object] = {
+            "as_of": fa.as_of.isoformat(),
+            "train_end": fa.train_end.isoformat(),
+            "n_train_rows": fa.n_train_rows,
+            "hmm_fit_attempted": fa.hmm_fit_attempted,
+            "hmm_status": fa.hmm_status,
+            "hmm_restarts": fa.hmm_restarts,
+            "hmm_max_iter": fa.hmm_max_iter,
+            "hmm_best_log_likelihood": fa.hmm_best_log_likelihood,
+            "n_hmm_obs_rows": fa.n_hmm_obs_rows,
+            "panel_qr_fit_attempted": fa.panel_qr_fit_attempted,
+            "panel_solver_status": fa.panel_solver_status,
+            "qr_objective_value": fa.qr_objective_value,
+            "fallback_used": fa.fallback_used,
+            "total_wall_clock_seconds": round(fa.total_wall_clock_seconds, 3),
+            "hmm_wall_clock_seconds": round(fa.hmm_wall_clock_seconds, 3),
+            "qr_wall_clock_seconds": round(fa.qr_wall_clock_seconds, 3),
+            "predict_wall_clock_seconds": round(fa.predict_wall_clock_seconds, 3),
+            "warm_start_used": fa.warm_start_used,
+            "warm_start_source_as_of": (
+                fa.warm_start_source_as_of.isoformat()
+                if fa.warm_start_source_as_of is not None
+                else None
+            ),
+            "best_restart_index": fa.best_restart_index,
+            "best_restart_was_warm_start": fa.best_restart_was_warm_start,
+            "warm_start_failure": fa.warm_start_failure,
+        }
+        fit_path = (
+            _panel_root(artifacts_root)
+            / f"as_of={week_result.as_of.isoformat()}"
+            / "panel_fit_artifact.json"
+        )
+        deps.write_json(fit_path, fit_artifact_payload)
 
     if last_label_map is not None:
         _write_panel_label_map(artifacts_root, last_label_map)

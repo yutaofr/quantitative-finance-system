@@ -369,6 +369,7 @@ def fit_panel_hmm(  # noqa: PLR0913
     tolerance: float = 1.0e-6,
     restarts: int = 50,
     transition_max_iter: int = 200,
+    warm_start_model: HMMModel | None = None,
 ) -> HMMModel:
     """pure. Fit the shared panel HMM using SPX as the label anchor."""
     inputs = build_panel_hmm_inputs(panel_frame, macro_series)
@@ -381,4 +382,5 @@ def fit_panel_hmm(  # noqa: PLR0913
         restarts=restarts,
         transition_max_iter=transition_max_iter,
         forward_52w_returns=inputs.label_anchor_returns,
+        warm_start_model=warm_start_model,
     )
