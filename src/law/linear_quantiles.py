@@ -87,7 +87,8 @@ def fit_linear_quantiles(  # noqa: PLR0913
     penalty = l2_alpha * (_CP.sum_squares(b) + _CP.sum_squares(c))
     problem = cp.Problem(cp.Minimize(_CP.sum(objective_terms) + penalty), constraints)
     try:
-        cast(Any, problem).solve(solver=solver)
+        with np.errstate(under="warn"):
+            cast(Any, problem).solve(solver=solver)
     except cp.error.SolverError as exc:
         msg = f"quantile solver failed: {exc}"
         raise QuantileSolverError(msg) from exc
