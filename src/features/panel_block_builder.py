@@ -367,7 +367,7 @@ def fit_panel_hmm(  # noqa: PLR0913
     *,
     max_iter: int = 200,
     tolerance: float = 1.0e-6,
-    restarts: int = 50,
+    restarts: int = 20,
     transition_max_iter: int = 200,
     warm_start_model: HMMModel | None = None,
 ) -> HMMModel:

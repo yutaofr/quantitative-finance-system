@@ -599,7 +599,7 @@ def _evaluate_panel_week(
         n_train_rows=n_train_rows,
         hmm_fit_attempted=True,
         hmm_status=hmm_status,
-        hmm_restarts=50,
+        hmm_restarts=20,
         hmm_max_iter=200,
         hmm_best_log_likelihood=hmm_best_ll,
         panel_qr_fit_attempted=not fallback_used,
