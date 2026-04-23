@@ -1207,28 +1207,128 @@ flowchart TB
 
 ---
 
-## 12. 扩展路径（v8.8 Panel）
+## 12. 扩展路径（v8.8.0 Panel Challenger）
 
-本 ADD v1.0 **仅实现 SRD v8.7.1 单资产生产路径**。v8.8 panel 扩展（SRD §19）的架构延伸要点：
+> **配套规范**: SRD v8.8.0 (revision-4, §P1–§P14)
+> **状态**: 经 5 轮专家审阅后冻结
 
-```mermaid
-flowchart TB
-    subgraph v87["v8.7.1 (当前)"]
-        qqq["NASDAQXNDX only"]
-    end
-    subgraph v88["v8.8 (规划)"]
-        panel["5-asset panel<br/>NASDAQXNDX, SPX, R2K, VEU, EEM"]
-        panel_law["law/panel_quantiles.py<br/>shared b_τ, c_τ, asset-specific α_{τ,a}"]
-        cluster_bs["backtest/cluster_block_bootstrap.py<br/>week-cluster resampling"]
-        dual_run["v8.7.1 单资产路径 **并行保留**<br/>（SRD §19.7）"]
-    end
+本节定义 v8.8.0 panel challenger 的**架构层面**实现方式。所有数学和常量来自 SRD v8.8.0。
 
-    v87 --> dual_run
-    v88 --> dual_run
-    dual_run -. "禁止静默吞掉<br/>单资产回归" .-> audit((audit))
+### 12.1 Panel 架构总览
+
+v8.8.0 实现固定 3 资产面板 (QQQ, SPY, IWM)，与 v8.7.1 单资产生产路径物理隔离并行运行。
+
+### 12.2 模块边界与层级归属
+
+| 新模块 | 层级 | 纯/IO | SRD 来源 | 描述 |
+|--------|------|-------|----------|------|
+| `data_contract/asset_registry.py` | L1 Adapter | pure (frozen data) | §P2.1.1 | `PanelAssetSpec` 注册表 |
+| `data_contract/yahoo_client.py` | L1 Adapter | io: http | §P2.1 | Yahoo Finance ETF adj close 拉取 |
+| `features/panel_block_builder.py` | L2 Domain | pure | §P3.1 | 共享 macro + 逐资产 micro 特征 |
+| `law/panel_quantiles.py` | L2 Domain | pure | §P5 | 联合面板分位数回归 |
+| `backtest/cluster_block_bootstrap.py` | L3 Use-case | pure | §P6.2 | 日历周簇重采样 |
+| `backtest/panel_metrics.py` | L3 Use-case | pure | §P7.3–P7.4 | 逐资产 + 面板聚合指标 |
+| `backtest/panel_acceptance.py` | L3 Use-case | pure | §P7.1–P7.2 | 面板 acceptance gates |
+
+### 12.3 防火墙规则
+
+`tests/test_panel_isolation.py` 强制执行：
+
+1. v8.7.1 production 模块 MUST NOT import panel 模块（`panel_quantiles`、`panel_block_builder`、`panel_metrics`、`panel_acceptance`）
+2. Panel 模块 MUST NOT write to production artifact paths（`production_output.json`、`artifacts/training/`）
+3. Panel 模块 MAY import v8.7.1 纯函数（`scaling.py`、`pca.py`、`ti_hmm_single.py`、`tail_extrapolation.py`）
+
+### 12.4 数据流
+
+```
+Yahoo Finance (QQQ/SPY/IWM) ──► asset_registry ──► panel_block_builder
+FRED (macro + VIXCLS/VXNCLS/RVXCLS) ──► panel_block_builder
+                                        │
+                                        ▼
+                                   PanelFeatureFrame
+                                   x_macro (T,7) + x_micro {asset: (T,3)}
+                                        │
+                              ┌─────────┴──────────┐
+                              ▼                    ▼
+                        ti_hmm_single          panel_quantiles
+                    (SPX-anchored,          (joint 3-asset solve,
+                     VIXCLS obs)            free intercepts)
+                              │                    │
+                              └─────────┬──────────┘
+                                        ▼
+                              panel_output.json
+                         (artifacts/panel_challenger/)
 ```
 
-**ADD 层承诺**：v8.8 实现时 **不修改** 本文档 §1–§11 中关于 v8.7.1 单资产路径的任何决策；仅在 `law/`、`backtest/`、`data_contract/` 下 **追加** 新模块。双跑期间以 `srd_version` 字段区分输出。
+### 12.5 关键接口签名（Panel 新增）
+
+```python
+# data_contract/asset_registry.py
+@dataclass(frozen=True, slots=True)
+class PanelAssetSpec:
+    """pure. Frozen panel asset specification."""
+    asset_id: str
+    ticker: str
+    pit_classification: Literal["log_return_pit", "pseudo_pit_risk"]
+    effective_panel_start: date
+    vol_series_id: str
+    vol_fallback_id: str | None
+    # ... (full spec in SRD §P2.1.1)
+
+PANEL_REGISTRY: Mapping[str, PanelAssetSpec]  # frozen, 3 entries
+
+# features/panel_block_builder.py
+@dataclass(frozen=True, slots=True)
+class PanelFeatureFrame:
+    """pure. Panel feature matrices."""
+    as_of: date
+    x_macro: NDArray[np.float64]                          # (T, 7)
+    x_micro: Mapping[str, NDArray[np.float64]]            # {asset_id: (T, 3)}
+    micro_feature_mode: Mapping[str, str]
+    available_assets: Sequence[str]
+    target_returns: Mapping[str, NDArray[np.float64]]
+
+def build_panel_feature_block(
+    macro_series: Mapping[str, TimeSeries],
+    asset_series: Mapping[str, Mapping[str, TimeSeries]],
+    as_of: date,
+) -> PanelFeatureFrame: ...  # pure
+
+# law/panel_quantiles.py
+@dataclass(frozen=True, slots=True)
+class PanelQRCoefs:
+    """pure. Panel quantile regression coefficients."""
+    alpha: Mapping[str, NDArray[np.float64]]   # {asset_id: (5,)} free
+    b: NDArray[np.float64]                      # (5, 7) shared macro
+    c: NDArray[np.float64]                      # (5, 3) shared state
+    delta: NDArray[np.float64]                  # (5, 3) shared micro
+    solver_status: str
+
+def fit_panel_quantiles(
+    x_macro: NDArray[np.float64],
+    x_micro: Mapping[str, NDArray[np.float64]],
+    pi: NDArray[np.float64],
+    y_52w: Mapping[str, NDArray[np.float64]],
+    mask: Mapping[str, NDArray[np.bool_]],
+    *, l2_alpha_macro: float = 2.0,
+    l2_alpha_micro: float = 2.0,
+    min_gap: float = 1e-4,
+) -> PanelQRCoefs: ...  # pure
+
+# backtest/panel_metrics.py
+def compute_panel_effective_start(
+    asset_registry: Mapping[str, PanelAssetSpec],
+    macro_feature_registry: Mapping[str, VintageSpec],
+    min_training_weeks: int = 312,
+    embargo_weeks: int = 53,
+) -> date: ...  # pure, week-by-week scan
+```
+
+### 12.6 v8.7.1 不变性保证
+
+**ADD 层承诺**：v8.8.0 实现 **不修改** 本文档 §1–§11 中关于 v8.7.1 单资产路径的任何决策；仅在 `law/`、`backtest/`、`data_contract/`、`features/` 下 **追加** 新模块。双跑期间以 `srd_version` 字段区分输出（`"8.7.1"` vs `"8.8.0"`）。
+
+`tests/test_v87_regression.py` 强制：panel 代码部署前后，v8.7.1 golden snapshot 字节一致。
 
 ---
 
@@ -1278,12 +1378,15 @@ qqq-law-engine/
 │  │  ├─ vintage_registry.py
 │  │  ├─ point_in_time.py
 │  │  ├─ cache.py                   # WriteOnceFS, parquet I/O
-│  │  └─ calendars.py
+│  │  ├─ calendars.py
+│  │  ├─ asset_registry.py          # [v8.8.0] PanelAssetSpec × 3
+│  │  └─ yahoo_client.py            # [v8.8.0] ETF adj close fetcher
 │  ├─ features/                     # L2 Domain (纯)
 │  │  ├─ __init__.py
 │  │  ├─ scaling.py
 │  │  ├─ block_builder.py
-│  │  └─ pca.py
+│  │  ├─ pca.py
+│  │  └─ panel_block_builder.py     # [v8.8.0] macro + per-asset micro
 │  ├─ state/
 │  │  ├─ __init__.py
 │  │  ├─ ti_hmm_single.py
@@ -1293,7 +1396,8 @@ qqq-law-engine/
 │  │  ├─ __init__.py
 │  │  ├─ linear_quantiles.py
 │  │  ├─ tail_extrapolation.py
-│  │  └─ quantile_moments.py
+│  │  ├─ quantile_moments.py
+│  │  └─ panel_quantiles.py         # [v8.8.0] joint 3-asset QR
 │  ├─ decision/
 │  │  ├─ __init__.py
 │  │  ├─ utility.py
@@ -1305,7 +1409,10 @@ qqq-law-engine/
 │  │  ├─ walkforward.py
 │  │  ├─ block_bootstrap.py
 │  │  ├─ metrics.py
-│  │  └─ acceptance.py
+│  │  ├─ acceptance.py
+│  │  ├─ cluster_block_bootstrap.py # [v8.8.0] week-cluster resampling
+│  │  ├─ panel_metrics.py           # [v8.8.0] per-asset + aggregate
+│  │  └─ panel_acceptance.py        # [v8.8.0] acceptance gates
 │  ├─ inference/
 │  │  ├─ __init__.py
 │  │  └─ weekly.py                  # 组合算子成一次周推断
@@ -1535,8 +1642,29 @@ def main(argv: Sequence[str]) -> int: ...
 
 > **注**: YAML 中的常量值**必须**与 SRD §18 一致；`tests/test_config_consistency.py` 逐行比对。
 
+**Panel 新增常量（SRD v8.8.0 §P10）**：
+
+| 常量                        | 值          | SRD §     | 代码位置                                |
+| --------------------------- | ----------- | --------- | --------------------------------------- |
+| panel assets (v8.8.0)       | 3           | §P1.4     | `configs/panel.yaml:panel_size`         |
+| α_macro (shared L2)         | 2.0         | §P5.2     | `configs/panel.yaml:l2_alpha_macro`     |
+| α_micro (micro L2)          | 2.0         | §P5.2     | `configs/panel.yaml:l2_alpha_micro`     |
+| α intercept                 | 0 (free)    | §P5.2     | (not penalized, hardcoded in solver)    |
+| per-asset quantile gap      | 1e-4        | §P5.2     | `configs/panel.yaml:min_gap`            |
+| per-asset tail mult         | 0.6         | §P5.5     | `configs/panel.yaml:tail_mult`          |
+| per-asset coverage tol      | 0.05        | §P7.2-6   | `configs/panel.yaml:coverage_tol`       |
+| per-asset coverage collapse | 0.08        | §P7.2-8   | `configs/panel.yaml:coverage_collapse`  |
+| panel CRPS improvement      | 5%          | §P7.2-7   | `configs/panel.yaml:crps_min_improve`   |
+| blocked cap                 | 15%         | §P7.2-9   | `configs/panel.yaml:blocked_cap`        |
+| bootstrap replications      | 2000        | §P6.2     | `configs/panel.yaml:B`                  |
+| bootstrap block lengths     | 52, 78      | §P6.2     | `configs/panel.yaml:block_lengths`      |
+| min training weeks          | 312         | §P6.1     | `configs/panel.yaml:min_train`          |
+| embargo weeks               | 53          | §P6.1     | `configs/panel.yaml:embargo_weeks`      |
+| HMM label anchor            | SPX         | §P4.2     | `configs/panel.yaml:label_anchor`       |
+| HMM vol input               | VIXCLS      | §P4.4     | `configs/panel.yaml:hmm_vol_series`     |
+
 ---
 
-**文档版本**: ADD v1.0
-**生效**: 与 SRD v8.7.1 同步
-**下一次修订触发条件**: SRD 升级至 v8.8 或任一 §中「MUST」无法由 CI 捕获。
+**文档版本**: ADD v1.1
+**生效**: 与 SRD v8.7.1 + SRD v8.8.0 同步
+**下一次修订触发条件**: SRD 升级至 v8.9 或任一 §中「MUST」无法由 CI 捕获。
