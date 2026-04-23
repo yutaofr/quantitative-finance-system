@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -70,10 +70,19 @@ def run_walkforward(  # noqa: PLR0913
     fit_training_artifacts: FitTrainingArtifacts,
     infer_weekly: InferWeekly,
     feature_cache: Mapping[date, Any] | None = None,
+    effective_strict_start: date | None = None,
+    strict_start_policy: Literal["allow", "raise", "clip_diagnostic"] = "allow",
 ) -> BacktestResult:
     """pure. Run weekly walk-forward inference on PIT-truncated history only."""
+    run_start = start
+    if effective_strict_start is not None and start < effective_strict_start:
+        if strict_start_policy == "raise":
+            msg = "strict walk-forward start precedes effective strict start"
+            raise ValueError(msg)
+        if strict_start_policy == "clip_diagnostic":
+            run_start = effective_strict_start
     outputs: list[WeeklyOutput] = []
-    for as_of in _weekly_dates(start, end):
+    for as_of in _weekly_dates(run_start, end):
         history = _slice_series_history(series, as_of)
         training_artifacts = fit_training_artifacts(as_of, history, cfg, feature_cache)
         outputs.append(infer_weekly(as_of, cfg, history, training_artifacts, feature_cache))

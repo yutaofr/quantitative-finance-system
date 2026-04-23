@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from datetime import date
 
 import numpy as np
+import pytest
 
 from backtest.walkforward import run_walkforward
 from config_types import FrozenConfig
@@ -173,3 +174,32 @@ def test_run_walkforward_only_exposes_history_up_to_each_week() -> None:
     ]
     assert seen_fit_max == [np.datetime64("2024-01-05"), np.datetime64("2024-01-12")]
     assert seen_infer_max == [np.datetime64("2024-01-05"), np.datetime64("2024-01-12")]
+
+
+def test_run_walkforward_raises_when_strict_start_precedes_effective_start() -> None:
+    timestamps = np.array(["2024-01-05", "2024-01-12"], dtype="datetime64[D]")
+    series = {
+        "DGS10": TimeSeries(
+            series_id="DGS10",
+            timestamps=timestamps,
+            values=np.array([1.0, 2.0], dtype=np.float64),
+            is_pseudo_pit=False,
+        ),
+    }
+
+    with pytest.raises(ValueError, match="effective strict start"):
+        run_walkforward(
+            start=date(2024, 1, 5),
+            end=date(2024, 1, 12),
+            series=series,
+            cfg=_config(),
+            fit_training_artifacts=lambda *_args, **_kwargs: TrainingArtifacts(
+                utility_zstats=None,
+                offense_thresholds=None,
+                train_distributions={},
+                state_label_map={0: "DEFENSIVE", 1: "NEUTRAL", 2: "OFFENSIVE"},
+            ),
+            infer_weekly=lambda *_args, **_kwargs: _output(date(2024, 1, 5)),
+            effective_strict_start=date(2024, 1, 12),
+            strict_start_policy="raise",
+        )

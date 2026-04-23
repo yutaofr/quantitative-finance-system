@@ -182,11 +182,21 @@ def test_run_backtest_job_writes_acceptance_report_next_to_results(
 
     report = json.loads((tmp_path / "backtest" / "acceptance_report.json").read_text())
     metadata = json.loads((tmp_path / "backtest" / "backtest_metadata.json").read_text())
+    challenger_output = json.loads(
+        (
+            tmp_path
+            / "backtest"
+            / "challenger"
+            / "as_of=2024-01-05"
+            / "challenger_output.json"
+        ).read_text(),
+    )
     assert code in {0, 3}
     assert output_path.exists()
     assert report["items"][0]["name"] == "bit_identical_determinism"
     assert metadata["actual_start"] == "2024-01-05"
     assert metadata["effective_strict_start"] == "2024-01-05"
+    assert challenger_output["status"] == "not_ready"
 
 
 def test_run_backtest_job_clips_start_to_effective_strict_week(

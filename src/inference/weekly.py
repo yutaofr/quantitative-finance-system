@@ -47,6 +47,11 @@ BLOCKS_KEY = "blocks"
 HISTORY_WEEK_ORDINALS_KEY = "history_week_ordinals"
 HISTORY_X_RAW_KEY = "history_x_raw"
 HISTORY_X_SCALED_KEY = "history_x_scaled"
+TARGET_RATES_BLOCK = (0, 1, 2, 3)
+CREDIT_LIQUIDITY_BLOCK = (4, 5, 6)
+VOLATILITY_BLOCK = (7, 8, 9)
+MISSING_BLOCK_COUNT_BLOCKED = 2
+MISSING_BLOCK_COUNT_DEGRADED = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,6 +279,28 @@ def _distribution_output(full_quantiles: NDArray[np.float64]) -> DistributionOut
     )
 
 
+def _block_fully_missing(missing_mask: NDArray[np.bool_], indices: tuple[int, ...]) -> bool:
+    return bool(np.all(missing_mask[np.asarray(indices, dtype=np.int64)]))
+
+
+def _missing_guard(
+    missing_mask: NDArray[np.bool_],
+) -> tuple[Literal["NORMAL", "DEGRADED", "BLOCKED"], str]:
+    missing_rate = float(np.mean(missing_mask))
+    fully_missing_blocks = sum(
+        [
+            _block_fully_missing(missing_mask, TARGET_RATES_BLOCK),
+            _block_fully_missing(missing_mask, CREDIT_LIQUIDITY_BLOCK),
+            _block_fully_missing(missing_mask, VOLATILITY_BLOCK),
+        ],
+    )
+    if missing_rate > MISSING_BLOCKED or fully_missing_blocks >= MISSING_BLOCK_COUNT_BLOCKED:
+        return "BLOCKED", "block_missing"
+    if missing_rate >= MISSING_DEGRADED or fully_missing_blocks >= MISSING_BLOCK_COUNT_DEGRADED:
+        return "DEGRADED", "block_missing"
+    return "NORMAL", "ok"
+
+
 def run_weekly(  # noqa: PLR0913
     as_of: date,
     vintage_mode: VintageMode,
@@ -295,8 +322,23 @@ def run_weekly(  # noqa: PLR0913
     else:
         raw, missing_mask = build_feature_block(series, as_of)
     missing_rate = float(np.mean(missing_mask))
-    if missing_rate > MISSING_BLOCKED:
-        return blocked_weekly_output(as_of, vintage_mode=vintage_mode, missing_rate=missing_rate)
+    missing_mode, missing_reason = _missing_guard(missing_mask)
+    if missing_mode == "BLOCKED":
+        return blocked_weekly_output(
+            as_of,
+            vintage_mode=vintage_mode,
+            missing_rate=missing_rate,
+            quantile_solver_status=missing_reason,
+            hmm_status=missing_reason,
+        )
+    if missing_mode == "DEGRADED":
+        return degraded_weekly_output(
+            as_of,
+            vintage_mode=vintage_mode,
+            missing_rate=missing_rate,
+            quantile_solver_status=missing_reason,
+            hmm_status=missing_reason,
+        )
 
     _raw_history, x_scaled_history, _missing_history = _feature_history(
         series,

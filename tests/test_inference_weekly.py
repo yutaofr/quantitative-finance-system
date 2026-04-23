@@ -117,3 +117,45 @@ def test_run_weekly_degrades_invalid_hmm_model() -> None:
 
     assert output.mode == "DEGRADED"
     assert output.diagnostics.hmm_status == "degenerate"
+
+
+def test_run_weekly_blocks_when_two_feature_blocks_are_fully_missing() -> None:
+    as_of = date(2024, 12, 27)
+    raw = np.arange(10, dtype=np.float64)
+    missing = np.array(
+        [True, True, True, True, True, True, True, False, False, False],
+        dtype=np.bool_,
+    )
+
+    output = run_weekly(
+        as_of,
+        "strict",
+        _series_map(as_of),
+        _training_artifacts(),
+        feature_cache={"blocks": {as_of: (raw, missing)}},
+    )
+
+    assert output.mode == "BLOCKED"
+    assert output.diagnostics.quantile_solver_status == "block_missing"
+    assert output.decision.offense_final == 50.0
+
+
+def test_run_weekly_degrades_when_missing_rate_is_high_without_two_missing_blocks() -> None:
+    as_of = date(2024, 12, 27)
+    raw = np.arange(10, dtype=np.float64)
+    missing = np.array(
+        [True, False, False, False, False, False, False, True, False, False],
+        dtype=np.bool_,
+    )
+
+    output = run_weekly(
+        as_of,
+        "strict",
+        _series_map(as_of),
+        _training_artifacts(),
+        feature_cache={"blocks": {as_of: (raw, missing)}},
+    )
+
+    assert output.mode == "DEGRADED"
+    assert output.diagnostics.quantile_solver_status == "block_missing"
+    assert output.decision.offense_final == 50.0

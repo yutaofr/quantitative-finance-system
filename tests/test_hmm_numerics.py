@@ -5,10 +5,10 @@ import pytest
 
 from errors import HMMConvergenceError
 from state.ti_hmm_single import (
-    _TransitionObjectiveData,
-    _transition_objective_grad,
     COV_EPSILON,
     HMMModel,
+    _transition_objective_grad,
+    _TransitionObjectiveData,
     gaussian_log_likelihood,
     infer_hmm,
     logsumexp3,
