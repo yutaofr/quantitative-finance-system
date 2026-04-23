@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections.abc import Callable, Mapping
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import date, timedelta
-from functools import partial
 import os
 from pathlib import Path
 from typing import Any, cast
@@ -116,20 +116,20 @@ def _panel_week_path(artifacts_root: Path, as_of: date) -> Path:
 
 
 def _slice_frame(frame: PanelFeatureFrame, end: date) -> PanelFeatureFrame:
-    indices = [idx for idx, week in enumerate(frame.feature_dates) if week <= end]
-    if not indices:
+    """pure. Return a view-based sub-frame truncated at `end` using O(log T) bisect."""
+    last = bisect_right(frame.feature_dates, end)
+    if last == 0:
         msg = "panel frame slice requires at least one row"
         raise ValueError(msg)
-    last = indices[-1] + 1
     feature_dates = frame.feature_dates[:last]
-    x_micro_raw = {asset_id: values[:last].copy() for asset_id, values in frame.x_micro_raw.items()}
-    x_micro = {asset_id: values[:last].copy() for asset_id, values in frame.x_micro.items()}
-    micro_mask = {asset_id: values[:last].copy() for asset_id, values in frame.micro_mask.items()}
+    x_micro_raw = {asset_id: values[:last] for asset_id, values in frame.x_micro_raw.items()}
+    x_micro = {asset_id: values[:last] for asset_id, values in frame.x_micro.items()}
+    micro_mask = {asset_id: values[:last] for asset_id, values in frame.micro_mask.items()}
     availability = {
-        asset_id: values[:last].copy() for asset_id, values in frame.asset_availability.items()
+        asset_id: values[:last] for asset_id, values in frame.asset_availability.items()
     }
     target_returns = {
-        asset_id: values[:last].copy() for asset_id, values in frame.target_returns.items()
+        asset_id: values[:last] for asset_id, values in frame.target_returns.items()
     }
     micro_modes = {
         asset_id: modes[:last] for asset_id, modes in frame.micro_feature_mode.items()
@@ -142,11 +142,11 @@ def _slice_frame(frame: PanelFeatureFrame, end: date) -> PanelFeatureFrame:
     return PanelFeatureFrame(
         as_of=feature_dates[-1],
         feature_dates=feature_dates,
-        x_macro_raw=frame.x_macro_raw[:last].copy(),
-        x_macro=frame.x_macro[:last].copy(),
+        x_macro_raw=frame.x_macro_raw[:last],
+        x_macro=frame.x_macro[:last],
         x_micro_raw=x_micro_raw,
         x_micro=x_micro,
-        macro_mask=frame.macro_mask[:last].copy(),
+        macro_mask=frame.macro_mask[:last],
         micro_mask=micro_mask,
         asset_availability=availability,
         micro_feature_mode=micro_modes,
@@ -156,7 +156,12 @@ def _slice_frame(frame: PanelFeatureFrame, end: date) -> PanelFeatureFrame:
 
 
 def _row_index(frame: PanelFeatureFrame, as_of: date) -> int:
-    return frame.feature_dates.index(as_of)
+    """pure. O(log T) date lookup using bisect."""
+    idx = bisect_right(frame.feature_dates, as_of) - 1
+    if idx < 0 or frame.feature_dates[idx] != as_of:
+        msg = f"as_of {as_of} not found in feature_dates"
+        raise ValueError(msg)
+    return idx
 
 
 def _build_asset_inputs(
@@ -352,6 +357,34 @@ def _panel_worker_count(total_weeks: int) -> int:
     return min(total_weeks, max(1, cpu))
 
 
+# ── ProcessPool worker state (initializer pattern) ──────────────────────
+# Large objects are pickled once per worker process via initializer,
+# instead of once per task via partial/closure.
+
+_WORKER_STATE: dict[str, Any] = {}
+
+
+def _init_panel_worker(
+    panel_frame: PanelFeatureFrame,
+    macro_series: Mapping[str, TimeSeries],
+    panel_config: Mapping[str, object],
+) -> None:
+    """io: Initializer for ProcessPoolExecutor workers — called once per process."""
+    _WORKER_STATE["frame"] = panel_frame
+    _WORKER_STATE["macro"] = macro_series
+    _WORKER_STATE["config"] = panel_config
+
+
+def _panel_worker_task(as_of: date) -> PanelWeekResult:
+    """io: Per-task entry point that reads shared state from module-level dict."""
+    return _evaluate_panel_week(
+        as_of,
+        panel_frame=_WORKER_STATE["frame"],
+        macro_series=_WORKER_STATE["macro"],
+        panel_config=_WORKER_STATE["config"],
+    )
+
+
 def _evaluate_panel_week(
     as_of: date,
     *,
@@ -517,18 +550,24 @@ def run_panel_backtest_job(  # noqa: PLR0912, PLR0915
     all_output_finite = True
     last_label_map: Mapping[int, Stance] | None = None
 
-    worker = partial(
-        _evaluate_panel_week,
-        panel_frame=panel_frame,
-        macro_series=macro_series,
-        panel_config=panel_config,
-    )
     worker_count = _panel_worker_count(len(eval_dates))
     if worker_count == 1:
-        week_results = [worker(as_of) for as_of in eval_dates]
+        week_results = [
+            _evaluate_panel_week(
+                as_of,
+                panel_frame=panel_frame,
+                macro_series=macro_series,
+                panel_config=panel_config,
+            )
+            for as_of in eval_dates
+        ]
     else:
-        with ProcessPoolExecutor(max_workers=worker_count) as executor:
-            week_results = list(executor.map(worker, eval_dates))
+        with ProcessPoolExecutor(
+            max_workers=worker_count,
+            initializer=_init_panel_worker,
+            initargs=(panel_frame, macro_series, panel_config),
+        ) as executor:
+            week_results = list(executor.map(_panel_worker_task, eval_dates))
 
     for week_index, week_result in enumerate(week_results):
         if week_result.label_map is not None:
