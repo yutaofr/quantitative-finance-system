@@ -14,7 +14,13 @@ from law.student_t_location_scale import StudentTFitResult
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    text = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    text = json.dumps(
+        payload,
+        allow_nan=False,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     path.write_text(text + "\n", encoding="utf-8")
 
 

@@ -191,12 +191,36 @@ def test_run_backtest_job_writes_acceptance_report_next_to_results(
             / "challenger_output.json"
         ).read_text(),
     )
+    validation_report = json.loads(
+        (
+            tmp_path
+            / "backtest"
+            / "challenger"
+            / "challenger_acceptance_aligned_report.json"
+        ).read_text(),
+    )
     assert code in {0, 3}
     assert output_path.exists()
     assert report["items"][0]["name"] == "bit_identical_determinism"
     assert metadata["actual_start"] == "2024-01-05"
     assert metadata["effective_strict_start"] == "2024-01-05"
     assert challenger_output["status"] == "not_ready"
+    assert validation_report["decision_metrics_comparable"] is False
+    failed_items = validation_report["production_acceptance_full_strict"]["remaining_failed_items"]
+    assert "interior_coverage" in failed_items
+    assert "crps_vs_baseline_a" in failed_items
+    assert (
+        validation_report["coverage_gap_accounting"]["reason_breakdown"][
+            "not_ready_due_to_train_rows_or_embargo"
+        ]["count"]
+        == 2
+    )
+    assert (
+        validation_report["acceptance_aligned_intersection_comparison"][
+            "production_on_intersection"
+        ]["q10_error"]
+        is None
+    )
 
 
 def test_run_backtest_job_clips_start_to_effective_strict_week(

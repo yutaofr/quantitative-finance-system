@@ -231,6 +231,10 @@ def _challenger_week_dir(root: Path, as_of: date) -> Path:
     return root / f"as_of={as_of.isoformat()}"
 
 
+def _read_json(path: Path) -> dict[str, object]:
+    return cast(dict[str, object], json.loads(path.read_text(encoding="utf-8")))
+
+
 def _history_x_scaled_by_week(feature_cache: Mapping[str, object]) -> dict[int, np.ndarray]:
     ordinals = np.asarray(feature_cache[HISTORY_WEEK_ORDINALS_KEY], dtype=np.int64)
     x_scaled = np.asarray(feature_cache[HISTORY_X_SCALED_KEY], dtype=np.float64)
@@ -316,15 +320,15 @@ def _write_challenger_week_output(
 def _collect_challenger_metrics(
     valid_predictions: list[_ChallengerPrediction],
     realized_all: np.ndarray,
-) -> dict[str, dict[str, float]]:
+) -> dict[str, dict[str, float | None]]:
     if not valid_predictions:
-        nan_metrics = {
-            "q10_error": float("nan"),
-            "q90_error": float("nan"),
-            "crps_improvement": float("nan"),
-            "ceq_diff": float("nan"),
+        empty_metrics: dict[str, float | None] = {
+            "q10_error": None,
+            "q90_error": None,
+            "crps_improvement": None,
+            "ceq_diff": None,
         }
-        return {"production": dict(nan_metrics), "challenger": dict(nan_metrics)}
+        return {"production": dict(empty_metrics), "challenger": dict(empty_metrics)}
     production_q10_hits: list[float] = []
     production_q90_hits: list[float] = []
     challenger_q10_hits: list[float] = []
@@ -380,6 +384,118 @@ def _collect_challenger_metrics(
             ),
         },
     }
+
+
+def build_challenger_acceptance_aligned_report(backtest_root: Path) -> dict[str, object]:
+    """io: Build acceptance-aligned challenger validation report from fresh artifacts."""
+    metadata = _read_json(backtest_root / "backtest_metadata.json")
+    acceptance = _read_json(backtest_root / "acceptance_report.json")
+    comparison = _read_json(backtest_root / "challenger" / "challenger_comparison_report.json")
+    effective_strict_start = date.fromisoformat(str(metadata["effective_strict_start"]))
+    strict_weeks_total = 0
+    for line in (backtest_root / "backtest_results.jsonl").read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        payload = cast(dict[str, object], json.loads(line))
+        if (
+            payload["vintage_mode"] == "strict"
+            and date.fromisoformat(str(payload["as_of_date"])) >= effective_strict_start
+        ):
+            strict_weeks_total += 1
+    challenger_root = backtest_root / "challenger"
+    status_counts: dict[str, int] = {}
+    for path in challenger_root.glob("as_of=*/challenger_output.json"):
+        payload = _read_json(path)
+        status = str(payload["status"])
+        status_counts[status] = status_counts.get(status, 0) + 1
+    comparison_counts = cast(dict[str, int], comparison["counts"])
+    valid_predictions = int(comparison_counts["valid_predictions"])
+    not_ready = status_counts.get("not_ready", 0)
+    excluded = max(strict_weeks_total - valid_predictions - not_ready, 0)
+    failed_items = [
+        str(item["name"])
+        for item in cast(list[dict[str, object]], acceptance["items"])
+        if not bool(item["passed"])
+    ]
+    acceptance_by_name = {
+        str(item["name"]): cast(dict[str, object], item["observed"])
+        for item in cast(list[dict[str, object]], acceptance["items"])
+    }
+    production_intersection = cast(dict[str, object], comparison["production"])
+    challenger_intersection = cast(dict[str, object], comparison["challenger"])
+    report = {
+        "window_metadata": {
+            "requested_start": str(metadata["requested_start"]),
+            "effective_strict_start": str(metadata["effective_strict_start"]),
+            "actual_start": str(metadata["actual_start"]),
+            "end": str(metadata["end"]),
+            "strict_weeks_total": strict_weeks_total,
+            "challenger_valid_weeks": valid_predictions,
+            "challenger_intersection_weeks": valid_predictions,
+        },
+        "production_acceptance_full_strict": {
+            "q10_error": acceptance_by_name["interior_coverage"]["q10_error"],
+            "q90_error": acceptance_by_name["interior_coverage"]["q90_error"],
+            "crps_improvement": acceptance_by_name["crps_vs_baseline_a"]["improvement"],
+            "ceq_diff": acceptance_by_name["ceq_vs_baseline_b"]["diff"],
+            "remaining_failed_items": failed_items,
+        },
+        "acceptance_aligned_intersection_comparison": {
+            "production_on_intersection": {
+                "q10_error": production_intersection["q10_error"],
+                "q90_error": production_intersection["q90_error"],
+                "crps_improvement": production_intersection["crps_improvement"],
+            },
+            "challenger_on_intersection": {
+                "q10_error": challenger_intersection["q10_error"],
+                "q90_error": challenger_intersection["q90_error"],
+                "crps_improvement": challenger_intersection["crps_improvement"],
+            },
+        },
+        "decision_metrics_comparable": False,
+        "decision_metrics_reason": "challenger reuses production offense_final",
+        "coverage_gap_accounting": {
+            "valid_predictions": valid_predictions,
+            "non_valid_predictions": strict_weeks_total - valid_predictions,
+            "reason_breakdown": {
+                "valid_predictions": {
+                    "count": valid_predictions,
+                    "explanation": (
+                        "strict week has challenger shadow quantiles and enters "
+                        "intersection benchmark"
+                    ),
+                },
+                "not_ready_due_to_train_rows_or_embargo": {
+                    "count": not_ready,
+                    "explanation": (
+                        "challenger had insufficient training rows after "
+                        "53-week embargo and 52-row minimum"
+                    ),
+                },
+                "excluded_due_to_feature_availability_or_block_missing": {
+                    "count": excluded,
+                    "explanation": (
+                        "strict week was excluded before challenger fit because "
+                        "finite x_scaled was unavailable or block-missing "
+                        "degraded the feature row"
+                    ),
+                },
+                "other_reasons": {
+                    "count": max(strict_weeks_total - valid_predictions - not_ready - excluded, 0),
+                    "explanation": (
+                        "no additional exclusions were observed unless this "
+                        "count is non-zero"
+                    ),
+                },
+                "fit_artifact_weeks": {
+                    "count": int(comparison_counts["fit_artifact_weeks"]),
+                    "explanation": "refit weeks only; not comparable to valid prediction count",
+                },
+            },
+        },
+    }
+    write_challenger_report(challenger_root / "challenger_acceptance_aligned_report.json", report)
+    return report
 
 
 def _run_challenger_shadow(
@@ -701,18 +817,19 @@ def run_backtest_job(
         realized_52w_returns=tuple(float(value) for value in realized),
     )
     deps.write_result(result_with_targets, output_path)
-    _run_challenger_shadow(
-        result_with_targets,
-        output_path,
-        feature_cache,
-        effective_start=effective_start,
-    )
     passed = write_acceptance_report(
         result_with_targets,
         cfg,
         output_path.with_name("acceptance_report.json"),
         effective_start,
     )
+    _run_challenger_shadow(
+        result_with_targets,
+        output_path,
+        feature_cache,
+        effective_start=effective_start,
+    )
+    build_challenger_acceptance_aligned_report(output_path.parent)
     return EXIT_OK if passed else EXIT_ACCEPTANCE_FAILED
 
 
