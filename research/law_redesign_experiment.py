@@ -36,6 +36,8 @@ TAUS_CRPS = np.linspace(0.05, 0.95, 19, dtype=np.float64)
 NU = 5.0
 L2 = 1.0e-3
 COVERAGE_WEIGHT = 10.0
+MIN_TRAIN_ROWS = 52
+REFIT_EVERY_WEEKS = 13
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,38 +104,16 @@ def _load_rows() -> list[EvalRow]:
     return rows
 
 
-def _quantile_score(y_true: np.ndarray, quantiles: np.ndarray, taus: np.ndarray) -> float:
-    delta = y_true[:, None] - quantiles
-    losses = np.maximum(taus[None, :] * delta, (taus[None, :] - 1.0) * delta)
-    return float(2.0 * np.mean(losses))
-
-
 def _baseline_a_quantiles(history: np.ndarray, fallback: float) -> np.ndarray:
     if history.shape[0] < 2:
         return np.full(TAUS_FULL.shape, fallback, dtype=np.float64)
     return np.quantile(history, TAUS_FULL).astype(np.float64)
 
 
-def _evaluate_baseline(rows: list[EvalRow]) -> dict[str, float]:
-    y = np.array([row.realized for row in rows], dtype=np.float64)
-    quantiles = np.stack([row.quantiles for row in rows])
-    baseline_a = np.stack(
-        [_baseline_a_quantiles(y[:idx], float(y[idx])) for idx in range(y.shape[0])],
-    )
-    q10_hits = y <= quantiles[:, 1]
-    q90_hits = y <= quantiles[:, 5]
-    offense = np.array([row.offense_final for row in rows], dtype=np.float64)
-    return {
-        "q10_error": abs(float(np.mean(q10_hits)) - 0.10),
-        "q90_error": abs(float(np.mean(q90_hits)) - 0.90),
-        "crps_improvement": float(
-            1.0
-            - _quantile_score(y, quantiles, TAUS_FULL) / _quantile_score(y, baseline_a, TAUS_FULL)
-        ),
-        "ceq_diff": float(
-            ceq_annualized(offense / 100.0 * y) - ceq_annualized(0.5 * y),
-        ),
-    }
+def _quantile_score(y_true: np.ndarray, quantiles: np.ndarray, taus: np.ndarray) -> float:
+    delta = y_true[:, None] - quantiles
+    losses = np.maximum(taus[None, :] * delta, (taus[None, :] - 1.0) * delta)
+    return float(2.0 * np.mean(losses))
 
 
 def _design(rows: list[EvalRow]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -174,69 +154,108 @@ def _objective(theta: np.ndarray, x_mu: np.ndarray, x_sigma: np.ndarray, y: np.n
     return crps_proxy + COVERAGE_WEIGHT * coverage_penalty + regularization
 
 
-def _fit_candidate(rows: list[EvalRow]) -> np.ndarray:
-    x_mu, x_sigma, y = _design(rows)
+def _initial_theta(x_mu: np.ndarray, x_sigma: np.ndarray, y: np.ndarray) -> np.ndarray:
     ridge_mu = 1.0e-3 * np.eye(x_mu.shape[1], dtype=np.float64)
     beta_mu0 = np.linalg.solve(x_mu.T @ x_mu + ridge_mu, x_mu.T @ y)
     residual = y - x_mu @ beta_mu0
     sigma_target = np.log(np.maximum(np.abs(residual), 1.0e-3))
     ridge_sigma = 1.0e-3 * np.eye(x_sigma.shape[1], dtype=np.float64)
-    beta_sigma0 = np.linalg.solve(
-        x_sigma.T @ x_sigma + ridge_sigma,
-        x_sigma.T @ sigma_target,
-    )
-    theta0 = np.concatenate([beta_mu0, beta_sigma0]).astype(np.float64)
-    result = minimize(
-        _objective,
-        theta0,
-        args=(x_mu, x_sigma, y),
-        method="Powell",
-        options={"maxiter": 200, "xtol": 1.0e-4, "ftol": 1.0e-4},
-    )
-    if not result.success:
-        raise RuntimeError(f"candidate optimization failed: {result.message}")
-    return np.asarray(result.x, dtype=np.float64)
+    beta_sigma0 = np.linalg.solve(x_sigma.T @ x_sigma + ridge_sigma, x_sigma.T @ sigma_target)
+    return np.concatenate([beta_mu0, beta_sigma0]).astype(np.float64)
 
 
-def _evaluate_candidate(rows: list[EvalRow], theta: np.ndarray) -> dict[str, float]:
+def _fit_candidate(
+    rows: list[EvalRow],
+    *,
+    theta0: np.ndarray | None = None,
+    maxiter: int,
+) -> np.ndarray:
     x_mu, x_sigma, y = _design(rows)
-    mu_dim = x_mu.shape[1]
-    quantiles = _predict_quantiles(
-        x_mu,
-        x_sigma,
-        theta[:mu_dim],
-        theta[mu_dim:],
-        TAUS_FULL,
-    )
+    initial = _initial_theta(x_mu, x_sigma, y) if theta0 is None else theta0
+    trial_iters = (maxiter, maxiter * 3, maxiter * 6)
+    last_message = "unknown"
+    for budget in trial_iters:
+        result = minimize(
+            _objective,
+            initial,
+            args=(x_mu, x_sigma, y),
+            method="Powell",
+            options={"maxiter": budget, "xtol": 1.0e-4, "ftol": 1.0e-4},
+        )
+        if result.success:
+            return np.asarray(result.x, dtype=np.float64)
+        initial = np.asarray(result.x, dtype=np.float64)
+        last_message = str(result.message)
+    raise RuntimeError(f"candidate optimization failed: {last_message}")
+
+
+def _evaluate_quantiles(rows: list[EvalRow], quantiles: np.ndarray, *, start_idx: int) -> dict[str, float]:
+    y_all = np.array([row.realized for row in rows], dtype=np.float64)
+    indices = np.arange(start_idx, y_all.shape[0], dtype=np.int64)
+    y = y_all[indices]
+    q = quantiles[indices]
     baseline_a = np.stack(
-        [_baseline_a_quantiles(y[:idx], float(y[idx])) for idx in range(y.shape[0])],
+        [_baseline_a_quantiles(y_all[:idx], float(y_all[idx])) for idx in indices],
     )
-    q10_hits = y <= quantiles[:, 1]
-    q90_hits = y <= quantiles[:, 5]
-    offense = np.array([row.offense_final for row in rows], dtype=np.float64)
+    q10_hits = y <= q[:, 1]
+    q90_hits = y <= q[:, 5]
+    offense = np.array([rows[idx].offense_final for idx in indices], dtype=np.float64)
     return {
         "q10_error": abs(float(np.mean(q10_hits)) - 0.10),
         "q90_error": abs(float(np.mean(q90_hits)) - 0.90),
-        "crps_improvement": float(
-            1.0
-            - _quantile_score(y, quantiles, TAUS_FULL) / _quantile_score(y, baseline_a, TAUS_FULL)
-        ),
-        "ceq_diff": float(
-            ceq_annualized(offense / 100.0 * y) - ceq_annualized(0.5 * y),
-        ),
+        "crps_improvement": float(1.0 - _quantile_score(y, q, TAUS_FULL) / _quantile_score(y, baseline_a, TAUS_FULL)),
+        "ceq_diff": float(ceq_annualized(offense / 100.0 * y) - ceq_annualized(0.5 * y)),
     }
+
+
+def _strict_walkforward_quantiles(rows: list[EvalRow]) -> np.ndarray:
+    x_mu_all, x_sigma_all, _y_all = _design(rows)
+    predictions = np.full((len(rows), TAUS_FULL.shape[0]), np.nan, dtype=np.float64)
+    theta: np.ndarray | None = None
+    for train_end in range(MIN_TRAIN_ROWS, len(rows), REFIT_EVERY_WEEKS):
+        theta = _fit_candidate(
+            rows[:train_end],
+            theta0=theta,
+            maxiter=60 if theta is None else 25,
+        )
+        mu_dim = x_mu_all.shape[1]
+        block_end = min(train_end + REFIT_EVERY_WEEKS, len(rows))
+        predictions[train_end:block_end] = _predict_quantiles(
+            x_mu_all[train_end:block_end],
+            x_sigma_all[train_end:block_end],
+            theta[:mu_dim],
+            theta[mu_dim:],
+            TAUS_FULL,
+        )
+    return predictions
 
 
 def main() -> None:
     rows = _load_rows()
-    baseline = _evaluate_baseline(rows)
-    theta = _fit_candidate(rows)
-    candidate = _evaluate_candidate(rows, theta)
+    baseline_quantiles = np.stack([row.quantiles for row in rows])
+    leaky_theta = _fit_candidate(rows, maxiter=200)
+    x_mu_all, x_sigma_all, _ = _design(rows)
+    mu_dim = x_mu_all.shape[1]
+    leaky_quantiles = _predict_quantiles(
+        x_mu_all,
+        x_sigma_all,
+        leaky_theta[:mu_dim],
+        leaky_theta[mu_dim:],
+        TAUS_FULL,
+    )
+    wf_quantiles = _strict_walkforward_quantiles(rows)
     payload = {
         "candidate_law": "state-conditional Student-t location-scale (mu=[1,x_scaled,pi], log_sigma=[1,pi], nu=5)",
         "objective": "mean quantile-score over taus 0.05..0.95 as CRPS proxy + 10*((cov10-0.10)^2 + (cov90-0.90)^2) + l2",
-        "baseline": baseline,
-        "candidate": candidate,
+        "walkforward_protocol": {
+            "min_train_rows": MIN_TRAIN_ROWS,
+            "refit_every_weeks": REFIT_EVERY_WEEKS,
+            "evaluation_start_index": MIN_TRAIN_ROWS,
+            "evaluation_start_as_of": rows[MIN_TRAIN_ROWS].as_of.isoformat(),
+        },
+        "production_baseline": _evaluate_quantiles(rows, baseline_quantiles, start_idx=MIN_TRAIN_ROWS),
+        "candidate_leaky_in_sample": _evaluate_quantiles(rows, leaky_quantiles, start_idx=MIN_TRAIN_ROWS),
+        "candidate_strict_walkforward": _evaluate_quantiles(rows, wf_quantiles, start_idx=MIN_TRAIN_ROWS),
     }
     print(json.dumps(payload, ensure_ascii=False))
 
