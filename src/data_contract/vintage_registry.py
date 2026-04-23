@@ -20,6 +20,7 @@ STRICT_PIT_STARTS: dict[str, date] = {
     "VXNCLS": date(2001, 2, 2),
     "VIXCLS": date(1990, 1, 2),
     "VXVCLS": date(2007, 12, 4),
+    "RVXCLS": date(2004, 1, 2),
 }
 
 PRODUCTION_FEATURE_SERIES = (

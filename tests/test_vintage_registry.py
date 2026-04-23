@@ -28,6 +28,7 @@ def test_strict_pit_start_dates_match_srd_section_4_3() -> None:
         "VXNCLS": date(2001, 2, 2),
         "VIXCLS": date(1990, 1, 2),
         "VXVCLS": date(2007, 12, 4),
+        "RVXCLS": date(2004, 1, 2),
     }
 
 

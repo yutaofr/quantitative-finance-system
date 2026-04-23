@@ -17,6 +17,7 @@ def test_frozen_constants_match_srd_v8_7() -> None:
     state = _load_config("state.yaml")
     decision = _load_config("decision.yaml")
     backtest = _load_config("backtest.yaml")
+    panel = _load_config("panel.yaml")
 
     assert features["hard_clip_bound"] == 5
     assert law["quantile_gap"] == 1.0e-4
@@ -32,3 +33,21 @@ def test_frozen_constants_match_srd_v8_7() -> None:
     assert backtest["maxdd_tol"] == 0.03
     assert backtest["turnover_cap"] == 1.5
     assert backtest["blocked_cap"] == 0.15
+    assert panel["panel_size"] == 3
+    assert panel["minimum_viable_panel_size"] == 3
+    assert panel["macro_feature_count"] == 7
+    assert panel["micro_feature_count"] == 3
+    assert panel["l2_alpha_macro"] == 2.0
+    assert panel["l2_alpha_micro"] == 2.0
+    assert panel["min_gap"] == 1.0e-4
+    assert panel["tail_mult"] == 0.6
+    assert panel["coverage_tol"] == 0.05
+    assert panel["coverage_collapse"] == 0.08
+    assert panel["crps_min_improve"] == 0.05
+    assert panel["blocked_cap"] == 0.15
+    assert panel["B"] == 2000
+    assert panel["block_lengths"] == [52, 78]
+    assert panel["min_train"] == 312
+    assert panel["embargo_weeks"] == 53
+    assert panel["label_anchor"] == "SPX"
+    assert panel["hmm_vol_series"] == "VIXCLS"

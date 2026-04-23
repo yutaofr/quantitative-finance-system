@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, date, datetime
 from enum import IntEnum
 import hashlib
@@ -16,11 +16,14 @@ from app.backtest_runner import run_backtest_job
 from app.config_loader import (
     load_adapter_secrets,
     load_frozen_config,
+    load_panel_config,
     production_hash_path,
     production_output_path,
 )
+from app.panel_runner import DEFAULT_BACKTEST_END, SMOKE_END, SMOKE_START, run_panel_backtest_job
 from app.runtime_deps import (
     build_backtest_runner_deps,
+    build_panel_runner_deps,
     build_train_runner_deps,
     build_weekly_runner_deps,
 )
@@ -37,6 +40,9 @@ BuildTrainRunnerDeps = Callable[..., object]
 BuildBacktestRunnerDeps = Callable[..., object]
 RunTrain = Callable[..., int]
 RunBacktest = Callable[..., int]
+LoadPanelConfig = Callable[..., Mapping[str, object]]
+BuildPanelRunnerDeps = Callable[..., object]
+RunPanelBacktest = Callable[..., int]
 
 
 class ExitCode(IntEnum):
@@ -64,6 +70,12 @@ def build_parser() -> argparse.ArgumentParser:
     backtest.add_argument("--start", required=True)
     backtest.add_argument("--end", required=True)
     backtest.add_argument("--artifacts-root", required=False, default="artifacts")
+
+    panel_smoke = subparsers.add_parser("panel-smoke")
+    panel_smoke.add_argument("--artifacts-root", required=False, default="artifacts")
+
+    panel_backtest = subparsers.add_parser("panel-backtest")
+    panel_backtest.add_argument("--artifacts-root", required=False, default="artifacts")
 
     train = subparsers.add_parser("train")
     train.add_argument("--window", required=True)
@@ -109,7 +121,7 @@ def _verify_artifact(
     return int(ExitCode.HASH_MISMATCH)
 
 
-def run(
+def run(  # noqa: PLR0911, PLR0915
     argv: Sequence[str] | None = None,
     *,
     deps_overrides: dict[str, object] | None = None,
@@ -193,6 +205,30 @@ def run(
             cfg=cfg,
             output_path=Path(args.artifacts_root) / "backtest" / "backtest_results.jsonl",
             deps=backtest_runner_deps,
+        )
+    if args.command in {"panel-smoke", "panel-backtest"}:
+        load_panel = cast(LoadPanelConfig, deps.get("load_panel_config", load_panel_config))
+        panel_job = cast(
+            RunPanelBacktest,
+            deps.get("run_panel_backtest_job", run_panel_backtest_job),
+        )
+        load_secrets = cast(LoadSecrets, deps.get("load_adapter_secrets", load_adapter_secrets))
+        build_deps = cast(
+            BuildPanelRunnerDeps,
+            deps.get("build_panel_runner_deps", build_panel_runner_deps),
+        )
+        panel_runner_deps = deps.get("panel_runner_deps")
+        if panel_runner_deps is None:
+            panel_runner_deps = build_deps(load_secrets(env))
+        panel_cfg = load_panel()
+        panel_start = SMOKE_START if args.command == "panel-smoke" else None
+        panel_end = SMOKE_END if args.command == "panel-smoke" else DEFAULT_BACKTEST_END
+        return panel_job(
+            start=panel_start,
+            end=panel_end,
+            panel_config=panel_cfg,
+            artifacts_root=Path(args.artifacts_root),
+            deps=panel_runner_deps,
         )
     parser.print_help(sys.stderr)
     return int(ExitCode.ENV_ERROR)

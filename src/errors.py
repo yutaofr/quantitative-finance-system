@@ -17,3 +17,7 @@ class HMMConvergenceError(LawEngineError):
 
 class QuantileSolverError(LawEngineError):
     """Raised when the conditional law quantile optimizer cannot return a valid fit."""
+
+
+class CachePoisonError(LawEngineError):
+    """Raised when an append-only cache would be overwritten with divergent bytes."""

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 from app.cli import ExitCode, run
@@ -222,3 +223,53 @@ def test_backtest_dispatches_to_walkforward_runner_with_jsonl_path(tmp_path: Pat
     ) == int(ExitCode.OK)
 
     assert seen["output_path"] == tmp_path / "backtest" / "backtest_results.jsonl"
+
+
+def test_panel_smoke_dispatches_to_panel_runner_with_frozen_window(tmp_path: Path) -> None:
+    seen: dict[str, object] = {}
+
+    def load_panel_config() -> dict[str, object]:
+        return {"panel_size": 3}
+
+    def run_panel_backtest_job(**kwargs: object) -> int:
+        seen.update(kwargs)
+        return int(ExitCode.OK)
+
+    assert run(
+        ["panel-smoke", "--artifacts-root", str(tmp_path)],
+        deps_overrides={
+            "load_panel_config": load_panel_config,
+            "run_panel_backtest_job": run_panel_backtest_job,
+            "panel_runner_deps": object(),
+        },
+        environ={"TZ": "America/New_York"},
+    ) == int(ExitCode.OK)
+
+    assert seen["start"] == date(2016, 1, 1)
+    assert seen["end"] == date(2016, 12, 30)
+    assert seen["artifacts_root"] == tmp_path
+
+
+def test_panel_backtest_dispatches_to_full_panel_runner(tmp_path: Path) -> None:
+    seen: dict[str, object] = {}
+
+    def load_panel_config() -> dict[str, object]:
+        return {"panel_size": 3}
+
+    def run_panel_backtest_job(**kwargs: object) -> int:
+        seen.update(kwargs)
+        return int(ExitCode.ACCEPTANCE_FAILED)
+
+    assert run(
+        ["panel-backtest", "--artifacts-root", str(tmp_path)],
+        deps_overrides={
+            "load_panel_config": load_panel_config,
+            "run_panel_backtest_job": run_panel_backtest_job,
+            "panel_runner_deps": object(),
+        },
+        environ={"TZ": "America/New_York"},
+    ) == int(ExitCode.ACCEPTANCE_FAILED)
+
+    assert seen["start"] is None
+    assert seen["end"] == date(2024, 12, 27)
+    assert seen["artifacts_root"] == tmp_path

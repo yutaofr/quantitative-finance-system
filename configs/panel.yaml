@@ -1,0 +1,28 @@
+panel_size: 3
+minimum_viable_panel_size: 3
+macro_feature_count: 7
+micro_feature_count: 3
+l2_alpha_macro: 2.0
+l2_alpha_micro: 2.0
+min_gap: 1.0e-4
+tail_mult: 0.6
+coverage_tol: 0.05
+coverage_collapse: 0.08
+crps_min_improve: 0.05
+blocked_cap: 0.15
+B: 2000
+block_lengths:
+  - 52
+  - 78
+min_train: 312
+embargo_weeks: 53
+label_anchor: SPX
+hmm_vol_series: VIXCLS
+pit_classification: log_return_pit
+assets:
+  - asset_id: NASDAQXNDX
+    ticker: QQQ
+  - asset_id: SPX
+    ticker: SPY
+  - asset_id: R2K
+    ticker: IWM

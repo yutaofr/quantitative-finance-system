@@ -47,6 +47,14 @@ weekly: build ## Run weekly inference for AS_OF=YYYY-MM-DD or auto.
 backtest: build ## Run the backtest command in the engine container.
 	IMAGE_TAG=$(IMAGE_TAG) $(COMPOSE) run --rm engine backtest --start $(START) --end $(END)
 
+.PHONY: panel-smoke
+panel-smoke: build ## Run the one-year 2016 panel challenger smoke validation.
+	IMAGE_TAG=$(IMAGE_TAG) $(COMPOSE) run --rm engine panel-smoke
+
+.PHONY: panel-backtest
+panel-backtest: build ## Run the full panel challenger backtest through 2024-12-27.
+	IMAGE_TAG=$(IMAGE_TAG) $(COMPOSE) run --rm engine panel-backtest
+
 .PHONY: train
 train: build ## Train production artifacts with a deterministic window.
 	IMAGE_TAG=$(IMAGE_TAG) $(COMPOSE) run --rm engine train --window $(WINDOW)

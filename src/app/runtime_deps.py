@@ -11,14 +11,17 @@ from typing import Any
 from app.backtest_runner import BacktestRunnerDeps, write_backtest_jsonl
 from app.config_loader import AdapterSecrets
 from app.output_serializer import write_weekly_output
+from app.panel_runner import PanelRunnerDeps
 from app.train_runner import TrainRunnerDeps, deterministic_training_rng
 from app.training_artifacts import load_training_artifacts, write_training_artifacts
 from app.weekly_runner import WeeklyRunnerDeps
 from backtest.walkforward import BacktestResult
 from config_types import FrozenConfig
+from data_contract.asset_registry import PANEL_REGISTRY
 from data_contract.derived_series import derive_rv20_nasdaq100
 from data_contract.fred_adapter import FredClient
 from data_contract.nasdaq_client import NasdaqClient
+from data_contract.yahoo_client import YahooFinanceClient
 from engine_types import TimeSeries, VintageMode, WeeklyOutput
 from inference.train import build_training_artifacts
 from inference.weekly import TrainingArtifacts, run_weekly
@@ -33,6 +36,18 @@ REQUIRED_SERIES = (
     "VXNCLS",
     "VIXCLS",
     "VXVCLS",
+)
+PANEL_REQUIRED_SERIES = (
+    "DGS10",
+    "DGS2",
+    "DGS1",
+    "EFFR",
+    "BAA10Y",
+    "WALCL",
+    "VIXCLS",
+    "VXVCLS",
+    "VXNCLS",
+    "RVXCLS",
 )
 DERIVED_PRICE_SERIES = "NASDAQXNDX"
 
@@ -184,4 +199,36 @@ def build_backtest_runner_deps(
         infer_weekly=infer_backtest_weekly,
         write_result=write_result,
         max_workers=max_workers,
+    )
+
+
+def build_panel_runner_deps(
+    secrets: AdapterSecrets,
+    *,
+    cache_root: Path = Path("data/raw/fred"),
+    yahoo_cache_root: Path = Path("data/raw/yahoo"),
+) -> PanelRunnerDeps:
+    """io: Build real panel challenger dependencies from adapter clients."""
+    fred_client = FredClient(api_key=secrets.fred_api_key, cache_root=cache_root)
+    yahoo_client = YahooFinanceClient(cache_root=yahoo_cache_root)
+
+    def fetch_macro_series(as_of: date, vintage_mode: VintageMode) -> dict[str, TimeSeries]:
+        return {
+            series_id: fred_client.get_series(series_id, as_of, vintage_mode)
+            for series_id in PANEL_REQUIRED_SERIES
+        }
+
+    def fetch_asset_prices(horizon_end: date) -> dict[str, TimeSeries]:
+        return {
+            asset_id: yahoo_client.fetch_etf_adjusted_close(
+                spec.ticker,
+                spec.inception_date,
+                horizon_end,
+            )
+            for asset_id, spec in PANEL_REGISTRY.items()
+        }
+
+    return PanelRunnerDeps(
+        fetch_macro_series=fetch_macro_series,
+        fetch_asset_prices=fetch_asset_prices,
     )

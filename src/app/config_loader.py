@@ -92,6 +92,14 @@ def load_frozen_config(
     )
 
 
+def load_panel_config(
+    *,
+    config_dir: Path = DEFAULT_CONFIG_DIR,
+) -> dict[str, Any]:
+    """io: Load the frozen v8.8 panel challenger config."""
+    return _load_yaml(config_dir / "panel.yaml")
+
+
 def load_adapter_secrets(env: Mapping[str, str]) -> AdapterSecrets:
     """io: Extract adapter credentials without mixing them into FrozenConfig."""
     return AdapterSecrets(
