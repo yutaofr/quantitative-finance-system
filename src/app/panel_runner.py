@@ -42,6 +42,7 @@ from features.panel_block_builder import (
     fit_panel_hmm,
 )
 from law.panel_quantiles import fit_panel_quantiles, predict_panel_interior_with_status
+from law.panel_quantiles_r1 import R1PanelQRCoefs, fit_r1_panel_quantiles, predict_r1_interior
 from law.quantile_moments import moments_from_quantiles
 from law.tail_extrapolation import extrapolate_tails
 from state.state_label_map import label_map_json_bytes
@@ -192,6 +193,44 @@ def _row_index(frame: PanelFeatureFrame, as_of: date) -> int:
         msg = f"as_of {as_of} not found in feature_dates"
         raise ValueError(msg)
     return idx
+
+
+R1_TRAIN_WINDOW = 416
+
+
+def _slice_frame_rolling(
+    frame: PanelFeatureFrame, end: date, max_weeks: int,
+) -> PanelFeatureFrame:
+    """pure. Rolling window slice: keep at most max_weeks rows ending at end."""
+    end_idx = bisect_right(frame.feature_dates, end)
+    if end_idx == 0:
+        msg = "panel frame rolling slice requires at least one row"
+        raise ValueError(msg)
+    start_idx = max(0, end_idx - max_weeks)
+    feature_dates = frame.feature_dates[start_idx:end_idx]
+    x_micro_raw = {a: v[start_idx:end_idx] for a, v in frame.x_micro_raw.items()}
+    x_micro = {a: v[start_idx:end_idx] for a, v in frame.x_micro.items()}
+    micro_mask = {a: v[start_idx:end_idx] for a, v in frame.micro_mask.items()}
+    availability = {a: v[start_idx:end_idx] for a, v in frame.asset_availability.items()}
+    target_returns = {a: v[start_idx:end_idx] for a, v in frame.target_returns.items()}
+    micro_modes = {a: v[start_idx:end_idx] for a, v in frame.micro_feature_mode.items()}
+    available_assets = tuple(
+        a for a, m in availability.items() if m.shape[0] > 0 and bool(m[-1])
+    )
+    return PanelFeatureFrame(
+        as_of=feature_dates[-1],
+        feature_dates=feature_dates,
+        x_macro_raw=frame.x_macro_raw[start_idx:end_idx],
+        x_macro=frame.x_macro[start_idx:end_idx],
+        x_micro_raw=x_micro_raw,
+        x_micro=x_micro,
+        macro_mask=frame.macro_mask[start_idx:end_idx],
+        micro_mask=micro_mask,
+        asset_availability=availability,
+        micro_feature_mode=micro_modes,
+        available_assets=available_assets,
+        target_returns=target_returns,
+    )
 
 
 def _build_asset_inputs(
@@ -439,6 +478,21 @@ def _run_chunk_sequential(
     return results
 
 
+def _run_chunk_r1(
+    chunk: tuple[date, ...],
+) -> list[PanelWeekResult]:
+    """io: Process a chunk of dates for R1 (no warm-start needed)."""
+    frame: PanelFeatureFrame = _WORKER_STATE["frame"]
+    macro: Mapping[str, TimeSeries] = _WORKER_STATE["macro"]
+    config: Mapping[str, object] = _WORKER_STATE["config"]
+    return [
+        _evaluate_panel_week_r1(
+            as_of, panel_frame=frame, macro_series=macro, panel_config=config,
+        )
+        for as_of in chunk
+    ]
+
+
 def _split_into_chunks(
     items: tuple[date, ...], n_chunks: int,
 ) -> list[tuple[date, ...]]:
@@ -632,6 +686,127 @@ def _evaluate_panel_week(
     )
 
 
+def _evaluate_panel_week_r1(
+    as_of: date,
+    *,
+    panel_frame: PanelFeatureFrame,
+    macro_series: Mapping[str, TimeSeries],
+    panel_config: Mapping[str, object],
+) -> PanelWeekResult:
+    """io: v8.8R1 evaluation — rolling window, q50+spreads, no HMM in law."""
+    t_total_start = time.perf_counter()
+    embargo = _config_int(panel_config, "embargo_weeks")
+    train_end = as_of - timedelta(weeks=embargo)
+    train_window = int(cast(Any, panel_config.get("train_window", R1_TRAIN_WINDOW)))
+    train_frame = _slice_frame_rolling(panel_frame, train_end, train_window)
+    history_frame = _slice_frame(panel_frame, as_of)
+    n_train_rows = len(train_frame.feature_dates)
+    rng = np.random.default_rng(8675309 + as_of.toordinal())
+
+    # ── HMM diagnostic only (failures are non-fatal in R1) ──
+    t_hmm_start = time.perf_counter()
+    hmm_model: HMMModel | None = None
+    hmm_inputs: PanelHMMInputs | None = None
+    hmm_status = "diagnostic_skipped"
+    try:
+        hmm_model, hmm_inputs, _posterior_path, hmm_status = _fit_panel_training_state(
+            train_frame, macro_series, rng,
+        )
+    except (HMMConvergenceError, FloatingPointError, ValueError):
+        hmm_status = "diagnostic_error"
+    t_hmm_end = time.perf_counter()
+    hmm_best_ll = hmm_model.log_likelihood if hmm_model is not None else None
+    n_hmm_obs = hmm_inputs.y_obs.shape[0] if hmm_inputs is not None else 0
+    label_map = hmm_model.label_map if hmm_model is not None else None
+
+    # ── R1 QR fit (no pi) ──
+    t_qr_start = time.perf_counter()
+    fallback_used = False
+    r1_coefs: R1PanelQRCoefs | None = None
+    try:
+        r1_coefs = fit_r1_panel_quantiles(
+            train_frame.x_macro,
+            {a: train_frame.x_micro[a] for a in PANEL_REGISTRY},
+            {a: train_frame.target_returns[a] for a in PANEL_REGISTRY},
+            {a: train_frame.asset_availability[a] for a in PANEL_REGISTRY},
+            l2_alpha_macro=_config_float(panel_config, "l2_alpha_macro"),
+            l2_alpha_micro=_config_float(panel_config, "l2_alpha_micro"),
+        )
+        panel_solver_status = r1_coefs.solver_status
+    except QuantileSolverError:
+        r1_coefs = None
+        panel_solver_status = "per_asset_fallback"
+        fallback_used = True
+    t_qr_end = time.perf_counter()
+
+    # ── HMM state for diagnostics ──
+    common_post, state_name, dwell_weeks, hazard_covariate = _current_hmm_state(
+        history_frame, macro_series, hmm_model,
+    )
+
+    # ── Predict + tail ──
+    t_predict_start = time.perf_counter()
+    row_idx = _row_index(history_frame, as_of)
+    asset_results: dict[str, PanelAssetWeekResult] = {}
+    for asset_id in PANEL_REGISTRY:
+        mode = history_frame.micro_feature_mode[asset_id][row_idx]
+        if r1_coefs is None or not bool(history_frame.asset_availability[asset_id][row_idx]):
+            asset_results[asset_id] = PanelAssetWeekResult(
+                available=False, micro_feature_mode=mode,
+                realized=None, full_quantiles=None,
+                solver_status=None, tail_status=None, moments=None,
+            )
+            continue
+        interior, solver_status = predict_r1_interior(
+            r1_coefs, asset_id,
+            history_frame.x_macro[row_idx],
+            history_frame.x_micro[asset_id][row_idx],
+        )
+        full_quantiles, tail_status = extrapolate_tails(
+            interior, mult=_config_float(panel_config, "tail_mult"),
+        )
+        realized = float(history_frame.target_returns[asset_id][row_idx])
+        moments = {
+            key: float(value)
+            for key, value in moments_from_quantiles(FULL_TAUS, full_quantiles).items()
+        }
+        asset_results[asset_id] = PanelAssetWeekResult(
+            available=True, micro_feature_mode=mode,
+            realized=realized, full_quantiles=full_quantiles,
+            solver_status=solver_status, tail_status=tail_status,
+            moments=moments,
+        )
+    t_predict_end = time.perf_counter()
+    t_total_end = time.perf_counter()
+
+    fit_artifact = PanelFitArtifact(
+        as_of=as_of, train_end=train_end, n_train_rows=n_train_rows,
+        hmm_fit_attempted=True, hmm_status=hmm_status,
+        hmm_restarts=20, hmm_max_iter=200,
+        hmm_best_log_likelihood=hmm_best_ll,
+        panel_qr_fit_attempted=not fallback_used,
+        panel_solver_status=panel_solver_status,
+        qr_objective_value=None, fallback_used=fallback_used,
+        total_wall_clock_seconds=t_total_end - t_total_start,
+        hmm_wall_clock_seconds=t_hmm_end - t_hmm_start,
+        qr_wall_clock_seconds=t_qr_end - t_qr_start,
+        predict_wall_clock_seconds=t_predict_end - t_predict_start,
+        n_hmm_obs_rows=n_hmm_obs,
+        warm_start_used=False, warm_start_source_as_of=None,
+        best_restart_index=hmm_model.best_restart_index if hmm_model else -1,
+        best_restart_was_warm_start=False, warm_start_failure=False,
+    )
+
+    return PanelWeekResult(
+        as_of=as_of, common_post=common_post,
+        state_name=state_name, dwell_weeks=dwell_weeks,
+        hazard_covariate=hazard_covariate,
+        panel_solver_status=panel_solver_status,
+        hmm_status=hmm_status, label_map=label_map,
+        asset_results=asset_results, fit_artifact=fit_artifact,
+    )
+
+
 def run_panel_backtest_job(  # noqa: PLR0912, PLR0915
     *,
     start: date | None,
@@ -641,16 +816,20 @@ def run_panel_backtest_job(  # noqa: PLR0912, PLR0915
     deps: PanelRunnerDeps,
 ) -> int:
     """io: Run the v8.8 fixed-panel challenger backtest or smoke stage."""
+    law_version = str(cast(Any, panel_config.get("law_version", "v0")))
+    is_r1 = law_version == "r1"
     vintage_mode: VintageMode = "strict"
     macro_series = deps.fetch_macro_series(end, vintage_mode)
     asset_prices = deps.fetch_asset_prices(end + timedelta(weeks=52))
     asset_inputs = _build_asset_inputs(macro_series, asset_prices)
     panel_frame = build_panel_feature_block(macro_series, asset_inputs, end)
+    train_weeks = int(cast(Any, panel_config.get("train_window", _config_int(panel_config, "min_train"))))
+    embargo = _config_int(panel_config, "embargo_weeks")
     effective_start = compute_panel_effective_start(
         PANEL_REGISTRY,
         STRICT_PIT_STARTS,
-        min_training_weeks=_config_int(panel_config, "min_train"),
-        embargo_weeks=_config_int(panel_config, "embargo_weeks"),
+        min_training_weeks=train_weeks,
+        embargo_weeks=embargo,
     )
     run_start = effective_start if start is None else max(start, effective_start)
     eval_dates = tuple(week for week in panel_frame.feature_dates if run_start <= week <= end)
@@ -675,13 +854,14 @@ def run_panel_backtest_job(  # noqa: PLR0912, PLR0915
     last_label_map: Mapping[int, Stance] | None = None
 
     worker_count = _panel_worker_count(len(eval_dates))
+    chunk_fn = _run_chunk_r1 if is_r1 else _run_chunk_sequential
     if worker_count == 1:
-        # Single-worker sequential with warm-start
+        # Single-worker sequential
         _WORKER_STATE["frame"] = panel_frame
         _WORKER_STATE["macro"] = macro_series
         _WORKER_STATE["config"] = panel_config
         _WORKER_STATE["_last_hmm_model"] = None
-        week_results = _run_chunk_sequential(eval_dates)
+        week_results = chunk_fn(eval_dates)
     else:
         chunks = _split_into_chunks(eval_dates, worker_count)
         with ProcessPoolExecutor(
@@ -689,7 +869,7 @@ def run_panel_backtest_job(  # noqa: PLR0912, PLR0915
             initializer=_init_panel_worker,
             initargs=(panel_frame, macro_series, panel_config),
         ) as executor:
-            chunk_results = list(executor.map(_run_chunk_sequential, chunks))
+            chunk_results = list(executor.map(chunk_fn, chunks))
         week_results = [r for chunk in chunk_results for r in chunk]
 
     for week_index, week_result in enumerate(week_results):
