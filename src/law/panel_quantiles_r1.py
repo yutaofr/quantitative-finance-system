@@ -7,6 +7,13 @@ Design:
   - Non-crossing guaranteed by spread >= 0 constraint (no rearrangement needed)
   - Partial pooling: b_shared + delta_b per asset, d_shared + delta_d per asset
   - No HMM π input — macro + micro only
+
+v8.8R1-rectified:
+  - q50 equation: signed X_macro, X_micro  (unchanged)
+  - spread equations: abs(X_macro), abs(X_micro)  ← absolute rectification
+    Rationale: rectified inputs eliminate feature polarity conflict under
+    the spread >= 0 non-negativity constraint. Solver can now learn positive
+    coefficients that scale with feature magnitude regardless of sign direction.
 """
 
 from __future__ import annotations
@@ -36,6 +43,7 @@ DEFAULT_MIN_SPREAD = 1.0e-4
 OPTIMAL_STATUSES = {"optimal", "optimal_inaccurate"}
 STATUS_OK = "ok"
 STATUS_FALLBACK = "per_asset_fallback"
+SPREAD_FEATURE_TRANSFORM = "abs_rectified"
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,20 +51,25 @@ class R1PanelQRCoefs:
     """pure. v8.8R1 panel QR coefficients with q50+spreads parameterization."""
 
     asset_ids: tuple[str, ...]
-    # q50 coefficients
+    # q50 coefficients (use signed features)
     alpha_q50: Mapping[str, float]
     b_shared_q50: NDArray[np.float64]       # (MACRO_DIM,)
     d_shared_q50: NDArray[np.float64]       # (MICRO_DIM,)
     delta_b_q50: Mapping[str, NDArray[np.float64]]  # per-asset (MACRO_DIM,)
     delta_d_q50: Mapping[str, NDArray[np.float64]]  # per-asset (MICRO_DIM,)
-    # spread coefficients (4 spreads: dn2, dn1, up1, up2) — per asset
+    # spread coefficients (use rectified |features|)
     alpha_spreads: Mapping[str, NDArray[np.float64]]  # per-asset (4,)
-    b_shared_spreads: NDArray[np.float64]   # (4, MACRO_DIM)
-    d_shared_spreads: NDArray[np.float64]   # (4, MICRO_DIM)
+    b_shared_spreads: NDArray[np.float64]   # (4, MACRO_DIM)  — fitted on |X_macro|
+    d_shared_spreads: NDArray[np.float64]   # (4, MICRO_DIM)  — fitted on |X_micro|
     delta_b_spreads: Mapping[str, NDArray[np.float64]]  # per-asset (4, MACRO_DIM)
     delta_d_spreads: Mapping[str, NDArray[np.float64]]  # per-asset (4, MICRO_DIM)
     solver_status: str
     model_status: str
+    # Polarity audit metadata
+    spread_feature_transform: str           # "abs_rectified" or "signed"
+    feature_polarity_conflict_tested: bool
+    b_shared_sp_l1_mean: float              # mean(|b_shared_sp|) — slope activity
+    d_shared_sp_l1_mean: float              # mean(|d_shared_sp|) — slope activity
 
 
 def _pinball_loss(residual: Any, tau: float) -> Any:
@@ -99,27 +112,29 @@ def fit_r1_panel_quantiles(  # noqa: PLR0913, PLR0915
     min_spread: float = DEFAULT_MIN_SPREAD,
     solver: str = "ECOS",
 ) -> R1PanelQRCoefs:
-    """pure. Fit v8.8R1 panel quantiles: q50 + spreads, base+delta pooling, no HMM."""
+    """pure. Fit v8.8R1 panel quantiles with abs-rectified spread inputs."""
     macro = _validate_inputs(x_macro, x_micro, y_52w, mask)
     asset_ids = tuple(x_micro)
     n_obs = macro.shape[0]
     n_assets = len(asset_ids)
 
-    # ── Decision variables (all 2D or 1D to avoid CVXPY 3D issues) ──
-    # q50: intercept per asset, shared macro/micro + per-asset deltas
+    # ── Rectified inputs for spread equations ──────────────────────────────
+    # q50 uses signed macro; spreads use |macro| to eliminate polarity conflict
+    macro_abs = np.abs(macro)
+
+    # ── Decision variables (all 2D or 1D to avoid CVXPY 3D issues) ────────
+    # q50: signed features
     alpha_q50 = cp.Variable(n_assets)
     b_shared_q50 = cp.Variable(MACRO_DIM)
     d_shared_q50 = cp.Variable(MICRO_DIM)
     delta_b_q50 = cp.Variable((n_assets, MACRO_DIM))
     delta_d_q50 = cp.Variable((n_assets, MICRO_DIM))
 
-    # spreads: 4 spreads (dn2, dn1, up1, up2)
-    # Per-asset intercepts
+    # spreads: rectified |features|
     alpha_sp = cp.Variable((n_assets, N_SPREADS))
-    # Shared spread coefficients
     b_shared_sp = cp.Variable((N_SPREADS, MACRO_DIM))
     d_shared_sp = cp.Variable((N_SPREADS, MICRO_DIM))
-    # Per-asset deltas for spreads — flattened to 2D: (n_assets, N_SPREADS * MACRO_DIM)
+    # Per-asset deltas for spreads — flattened to 2D: (n_assets, N_SPREADS * DIM)
     delta_b_sp_flat = cp.Variable((n_assets, N_SPREADS * MACRO_DIM))
     delta_d_sp_flat = cp.Variable((n_assets, N_SPREADS * MICRO_DIM))
 
@@ -136,35 +151,35 @@ def fit_r1_panel_quantiles(  # noqa: PLR0913, PLR0915
             raise ValueError(msg)
 
         weights = avail_a.astype(np.float64)
+        # Rectified micro for spread equations
+        micro_abs_a = np.abs(micro_a)
 
-        # q50 prediction for this asset
+        # q50 prediction — signed features
         pred_q50 = (
             macro @ (b_shared_q50 + delta_b_q50[ai])
             + micro_a @ (d_shared_q50 + delta_d_q50[ai])
             + alpha_q50[ai]
         )
 
-        # spread predictions
+        # spread predictions — rectified |features|
         pred_spreads = []
         for si in range(N_SPREADS):
-            # Index into flattened delta arrays
             b_offset = si * MACRO_DIM
             d_offset = si * MICRO_DIM
             sp = (
-                macro @ (b_shared_sp[si] + delta_b_sp_flat[ai, b_offset:b_offset + MACRO_DIM])
-                + micro_a @ (d_shared_sp[si] + delta_d_sp_flat[ai, d_offset:d_offset + MICRO_DIM])
+                macro_abs @ (b_shared_sp[si] + delta_b_sp_flat[ai, b_offset:b_offset + MACRO_DIM])
+                + micro_abs_a @ (d_shared_sp[si] + delta_d_sp_flat[ai, d_offset:d_offset + MICRO_DIM])
                 + alpha_sp[ai, si]
             )
             pred_spreads.append(sp)
-            # Non-negativity: spread >= min_spread on available rows
+            # Non-negativity: constraint on the full prediction (intercept + Xb)
             constraints.append(_CP.multiply(weights, sp) >= min_spread * weights)
 
-        # Reconstruct quantiles: q10, q25, q50, q75, q90
-        # spreads: [dn2, dn1, up1, up2]
-        pred_q25 = pred_q50 - pred_spreads[1]  # dn1
-        pred_q10 = pred_q25 - pred_spreads[0]  # dn2
-        pred_q75 = pred_q50 + pred_spreads[2]  # up1
-        pred_q90 = pred_q75 + pred_spreads[3]  # up2
+        # Reconstruct quantiles: spreads order = [dn2, dn1, up1, up2]
+        pred_q25 = pred_q50 - pred_spreads[1]   # dn1
+        pred_q10 = pred_q25 - pred_spreads[0]   # dn2
+        pred_q75 = pred_q50 + pred_spreads[2]   # up1
+        pred_q90 = pred_q75 + pred_spreads[3]   # up2
 
         predictions = [pred_q10, pred_q25, pred_q50, pred_q75, pred_q90]
 
@@ -174,11 +189,11 @@ def fit_r1_panel_quantiles(  # noqa: PLR0913, PLR0915
                 _CP.sum(_CP.multiply(weights, _pinball_loss(residual, tau))),
             )
 
-    # ── Regularization (q50 shared and spread shared separated) ──
-    # q50 shared coefficients
+    # ── Regularization (q50 shared and spread shared separated) ───────────
+    # q50 shared (signed features) — stronger prior
     penalty = l2_alpha_macro * _CP.sum_squares(b_shared_q50)
     penalty += l2_alpha_micro * _CP.sum_squares(d_shared_q50)
-    # spread shared coefficients (independent penalty)
+    # spread shared (rectified features) — lighter prior, slope can grow freely
     penalty += l2_alpha_spread_macro * _CP.sum_squares(b_shared_sp)
     penalty += l2_alpha_spread_micro * _CP.sum_squares(d_shared_sp)
     # Delta penalties (partial pooling shrinkage)
@@ -216,13 +231,17 @@ def fit_r1_panel_quantiles(  # noqa: PLR0913, PLR0915
         delta_b_q50_dict[asset_id] = np.asarray(delta_b_q50.value[ai], dtype=np.float64)
         delta_d_q50_dict[asset_id] = np.asarray(delta_d_q50.value[ai], dtype=np.float64)
         alpha_sp_dict[asset_id] = np.asarray(alpha_sp.value[ai], dtype=np.float64)
-        # Reshape flat deltas back to (N_SPREADS, DIM)
         delta_b_sp_dict[asset_id] = np.asarray(
             delta_b_sp_flat.value[ai], dtype=np.float64,
         ).reshape(N_SPREADS, MACRO_DIM)
         delta_d_sp_dict[asset_id] = np.asarray(
             delta_d_sp_flat.value[ai], dtype=np.float64,
         ).reshape(N_SPREADS, MICRO_DIM)
+
+    b_sp_val = np.asarray(b_shared_sp.value, dtype=np.float64)
+    d_sp_val = np.asarray(d_shared_sp.value, dtype=np.float64)
+    b_l1_mean = float(np.mean(np.abs(b_sp_val)))
+    d_l1_mean = float(np.mean(np.abs(d_sp_val)))
 
     return R1PanelQRCoefs(
         asset_ids=asset_ids,
@@ -232,12 +251,16 @@ def fit_r1_panel_quantiles(  # noqa: PLR0913, PLR0915
         delta_b_q50=MappingProxyType(delta_b_q50_dict),
         delta_d_q50=MappingProxyType(delta_d_q50_dict),
         alpha_spreads=MappingProxyType(alpha_sp_dict),
-        b_shared_spreads=np.asarray(b_shared_sp.value, dtype=np.float64),
-        d_shared_spreads=np.asarray(d_shared_sp.value, dtype=np.float64),
+        b_shared_spreads=b_sp_val,
+        d_shared_spreads=d_sp_val,
         delta_b_spreads=MappingProxyType(delta_b_sp_dict),
         delta_d_spreads=MappingProxyType(delta_d_sp_dict),
         solver_status=STATUS_OK,
         model_status="NORMAL",
+        spread_feature_transform=SPREAD_FEATURE_TRANSFORM,
+        feature_polarity_conflict_tested=True,
+        b_shared_sp_l1_mean=b_l1_mean,
+        d_shared_sp_l1_mean=d_l1_mean,
     )
 
 
@@ -258,22 +281,25 @@ def predict_r1_interior(
         raise KeyError(msg)
 
     with np.errstate(under="ignore"):
-        # q50
+        # q50 — signed features
         b_q50 = coefs.b_shared_q50 + coefs.delta_b_q50[asset_id]
         d_q50 = coefs.d_shared_q50 + coefs.delta_d_q50[asset_id]
         q50 = float(coefs.alpha_q50[asset_id] + b_q50 @ macro + d_q50 @ micro)
 
-        # spreads
+        # spreads — rectified |features| (consistent with training)
+        macro_abs = np.abs(macro)
+        micro_abs = np.abs(micro)
         sp_alpha = coefs.alpha_spreads[asset_id]
         sp_b = coefs.b_shared_spreads + coefs.delta_b_spreads[asset_id]
         sp_d = coefs.d_shared_spreads + coefs.delta_d_spreads[asset_id]
+        raw_spreads = sp_alpha + sp_b @ macro_abs + sp_d @ micro_abs
 
-        raw_spreads = sp_alpha + sp_b @ macro + sp_d @ micro
-
-    # Clip spreads to minimum (should already be non-negative from solver)
+    # Clip to minimum
     spreads = np.maximum(raw_spreads, DEFAULT_MIN_SPREAD)
 
-    dn2, dn1, up1, up2 = float(spreads[0]), float(spreads[1]), float(spreads[2]), float(spreads[3])
+    dn2, dn1, up1, up2 = (
+        float(spreads[0]), float(spreads[1]), float(spreads[2]), float(spreads[3]),
+    )
     q25 = q50 - dn1
     q10 = q25 - dn2
     q75 = q50 + up1
