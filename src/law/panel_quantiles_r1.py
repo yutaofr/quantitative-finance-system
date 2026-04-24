@@ -30,6 +30,7 @@ MICRO_DIM = 3
 MATRIX_NDIM = 2
 N_SPREADS = 4
 DEFAULT_L2_ALPHA = 2.0
+DEFAULT_L2_ALPHA_SPREAD = 0.1
 DEFAULT_L2_DELTA = 0.5
 DEFAULT_MIN_SPREAD = 1.0e-4
 OPTIMAL_STATUSES = {"optimal", "optimal_inaccurate"}
@@ -91,6 +92,8 @@ def fit_r1_panel_quantiles(  # noqa: PLR0913, PLR0915
     *,
     l2_alpha_macro: float = DEFAULT_L2_ALPHA,
     l2_alpha_micro: float = DEFAULT_L2_ALPHA,
+    l2_alpha_spread_macro: float = DEFAULT_L2_ALPHA_SPREAD,
+    l2_alpha_spread_micro: float = DEFAULT_L2_ALPHA_SPREAD,
     l2_delta_macro: float = DEFAULT_L2_DELTA,
     l2_delta_micro: float = DEFAULT_L2_DELTA,
     min_spread: float = DEFAULT_MIN_SPREAD,
@@ -171,15 +174,13 @@ def fit_r1_panel_quantiles(  # noqa: PLR0913, PLR0915
                 _CP.sum(_CP.multiply(weights, _pinball_loss(residual, tau))),
             )
 
-    # ── Regularization ──
-    penalty = l2_alpha_macro * (
-        _CP.sum_squares(b_shared_q50)
-        + _CP.sum_squares(b_shared_sp)
-    )
-    penalty += l2_alpha_micro * (
-        _CP.sum_squares(d_shared_q50)
-        + _CP.sum_squares(d_shared_sp)
-    )
+    # ── Regularization (q50 shared and spread shared separated) ──
+    # q50 shared coefficients
+    penalty = l2_alpha_macro * _CP.sum_squares(b_shared_q50)
+    penalty += l2_alpha_micro * _CP.sum_squares(d_shared_q50)
+    # spread shared coefficients (independent penalty)
+    penalty += l2_alpha_spread_macro * _CP.sum_squares(b_shared_sp)
+    penalty += l2_alpha_spread_micro * _CP.sum_squares(d_shared_sp)
     # Delta penalties (partial pooling shrinkage)
     penalty += l2_delta_macro * (
         _CP.sum_squares(delta_b_q50)
