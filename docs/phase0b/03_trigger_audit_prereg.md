@@ -11,6 +11,7 @@
 1. 哪些外部信号具备最低 trigger 候选资格。
 2. 哪些信号只是解释性变量，不能进入门控。
 3. trigger 审计如何避免把滞后变量伪装成先导信号。
+4. trigger 候选的纳入/排除如何避免选择性偏差。
 
 ## 2. 上游协议约束
 
@@ -24,17 +25,24 @@
 ## 3. Trigger 审计对象清单
 
 > 说明  
-> 以下对象只是候选，不具自动准入资格。
+> 以下对象只是候选，不具自动准入资格。是否纳入本轮审计的决定，必须在**触碰任何原始数据之前**完成并写死。纳入决策一经锁定，不得因看到任何数据片段、描述性统计或预运行结果而修改。
 
-| Trigger 名称 | 是否纳入本轮审计 | 备注 | 状态 |
-|---|---|---|---|
-| VIX9D / VIX | UNFILLED | UNFILLED | UNFILLED |
-| VIX / VIX3M | UNFILLED | UNFILLED | UNFILLED |
-| ΔVIX9D | UNFILLED | UNFILLED | UNFILLED |
-| credit spread jump | UNFILLED | UNFILLED | UNFILLED |
-| FRA-OIS widening | UNFILLED | UNFILLED | UNFILLED |
-| liquidity stress signals | UNFILLED | UNFILLED | UNFILLED |
-| lagged realized shock | UNFILLED | UNFILLED | UNFILLED |
+### 3.1 纳入决策的治理规则
+
+1. 纳入/排除的截止点是：**在触碰任何原始数据之前**。  
+2. 默认规则是：要么全量送审，要么对每个被排除信号写出**先验机制性理由**。  
+3. 排除理由不得引用任何数据相关表述，不得以“看起来可能没用”“以前效果不好”作为理由。  
+4. 若未在截止点前完成纳入决策锁定，则整个 trigger audit 无效。
+
+| Trigger 名称 | 是否纳入本轮审计 | 先验保留/排除理由 | 备注 | 状态 |
+|---|---|---|---|---|
+| VIX9D / VIX | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
+| VIX / VIX3M | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
+| ΔVIX9D | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
+| credit spread jump | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
+| FRA-OIS widening | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
+| liquidity stress signals | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
+| lagged realized shock | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
 
 ## 4. `L_max` 预注册区
 
@@ -120,12 +128,14 @@
 3. 不得在看到结果后更改 `L_max`。  
 4. 不得把落在 `-L_max` 之外的更长提前量包装成法定 lead 证据。  
 5. 不得在 trigger 结果不利时重写 false positive 口径。  
+6. 不得在触碰任何原始数据之后才决定哪些 trigger 纳入本轮审计。  
 
 ## 10. 运行前检查项
 
 | 检查项 | 状态 | 备注 |
 |---|---|---|
 | trigger 清单是否锁定 | UNFILLED | UNFILLED |
+| 纳入/排除理由是否已写死 | UNFILLED | 若否，则 trigger audit 不得开始 |
 | `L_max` 是否预注册 | UNFILLED | UNFILLED |
 | 合法 lead window 是否由 `L_max` 唯一定义 | UNFILLED | UNFILLED |
 | false positive 计算方式是否锁定 | UNFILLED | UNFILLED |
