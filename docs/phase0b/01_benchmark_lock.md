@@ -11,6 +11,7 @@
 1. 2020 的失败是否为当前 `Stage A = T5` 的特有缺陷。
 2. 还是连续危机波动模型的共同上限。
 3. 未来若进入 Phase 0B，新的候选 crisis architecture 是否真的优于简单连续 benchmark。
+4. 为 Phase 0A 第 4 节条件 D 提供合法的 `Benchmark_2008_std(z)` 分母值。
 
 本文件不输出结果，不分析优劣，不讨论新架构。
 
@@ -87,28 +88,38 @@
 
 ## 7. 窗口与滚动方式锁定
 
-### 固定窗口
+### 固定比较窗口
 
-| 窗口名 | 起始日期 | 结束日期 | 状态 |
-|---|---|---|---|
-| Window_2017 | 2017-07-07 | 2017-12-29 | LOCKED |
-| Window_2018 | 2018-07-06 | 2018-12-28 | LOCKED |
-| Window_2020 | 2020-01-03 | 2020-06-26 | LOCKED |
+| 窗口名 | 起始日期 | 结束日期 | 用途 | 状态 |
+|---|---|---|---|---|
+| Window_2017 | 2017-07-07 | 2017-12-29 | Phase 0A 固定比较窗口 | LOCKED |
+| Window_2018 | 2018-07-06 | 2018-12-28 | Phase 0A 固定比较窗口 | LOCKED |
+| Window_2020 | 2020-01-03 | 2020-06-26 | Phase 0A 固定比较窗口 | LOCKED |
+| Window_2008_Benchmark | 2008-01-04 | 2008-12-26 | 仅用于生成 `Benchmark_2008_std(z)` 与 benchmark 的 2008 绝对表现 | LOCKED |
 
 ### 训练/评估方式
 
 | 字段 | 取值 | 状态 | 说明 |
 |---|---|---|---|
 | 滚动方式 | UNFILLED | UNFILLED | expanding / rolling / fixed 等 |
-| 训练窗定义 | UNFILLED | UNFILLED | 必须写清楚 |
+| 训练窗定义（2017/2018/2020） | UNFILLED | UNFILLED | 必须写清楚 |
+| 训练窗定义（2008 benchmark run） | UNFILLED | UNFILLED | 必须写清楚，且不得依赖 2008 之后的信息 |
 | 预测频率 | UNFILLED | UNFILLED | 日频 / 周频映射方式必须明确 |
 | 输出频率 | UNFILLED | UNFILLED | 与 T5 比较口径必须一致 |
 | 数据源 | UNFILLED | UNFILLED | 必须固定 |
+
+### 2008 benchmark run 的法理用途
+
+1. `Window_2008_Benchmark` 的唯一用途是为 Phase 0A 第 4 节条件 D 提供 `Benchmark_2008_std(z)` 与 benchmark 的 2008 绝对表现。  
+2. 该运行不构成对 T5 的追溯性 OOS 证明。  
+3. 该运行允许 benchmark 在 2008 窗口进行**评估**，但其模型类、阶数、分布与估计协议必须完全遵守本文件的预锁定条款。  
+4. 若 2008 benchmark run 的训练/预测信息集定义未在运行前写死，则 `Benchmark_2008_std(z)` 不具法律地位，不得进入任何结果表。
 
 ### 约束
 
 - 不得在看到结果后切换滚动方式。  
 - benchmark 与 T5 的比较必须使用一致的窗口口径。  
+- 2008 benchmark run 的训练信息集必须在运行前写死。  
 
 ## 8. 禁止事项
 
@@ -118,6 +129,7 @@
 4. 不得在结果出来后更改 CRPS 的分布族假设。  
 5. 不得在结果出来后改滚动方式、优化器或容差。  
 6. 不得把“更复杂”或“更弱”的 benchmark 拿来事后调包。  
+7. 不得在未锁定 2008 benchmark run 协议的情况下生成 `Benchmark_2008_std(z)`。  
 
 ## 9. 运行前检查项
 
@@ -129,7 +141,8 @@
 | 是否允许外生变量是否写死 | UNFILLED | UNFILLED |
 | CRPS 分布族假设是否写死 | UNFILLED | UNFILLED |
 | 优化器与容差是否写死 | UNFILLED | UNFILLED |
-| 三个固定窗口是否一致 | PASS | 已冻结 |
+| 四个固定窗口是否一致 | PASS | 已冻结 |
+| 2008 benchmark run 的训练信息集是否写死 | UNFILLED | 若否，则不得生成 `Benchmark_2008_std(z)` |
 | 滚动方式是否写死 | UNFILLED | UNFILLED |
 | 所有 `UNFILLED` 是否已清空 | UNFILLED | 若否，则不得运行 benchmark |
 
@@ -151,7 +164,8 @@
 - 收敛失败处理：UNFILLED
 - 数值异常处理：UNFILLED
 - 滚动方式：UNFILLED
-- 训练窗定义：UNFILLED
+- 训练窗定义（2017/2018/2020）：UNFILLED
+- 训练窗定义（2008 benchmark run）：UNFILLED
 - 预测频率：UNFILLED
 - 输出频率：UNFILLED
 - 数据源：UNFILLED
