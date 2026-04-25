@@ -10,7 +10,7 @@
 
 1. benchmark 是否已锁定并交付  
 2. trigger audit 是否已预注册并完成  
-3. OOS freeze 是否已冻结  
+3. OOS 样本边界是否已冻结  
 4. bootstrap sign-stability 是否已预注册  
 
 若任一项不完整，则默认不得进入 Phase 0B。
@@ -21,7 +21,7 @@
 
 1. Benchmark Delivery 已完成  
 2. Trigger Audit Delivery 已完成且至少存在一个合法 trigger  
-3. OOS Freeze Declaration 已冻结  
+3. OOS Boundary Freeze 已冻结  
 4. Bootstrap Sign-Stability Preregistration 已冻结  
 
 ## 3. 四项前置交付状态表
@@ -30,8 +30,8 @@
 |---|---|---|---|---|---|
 | Benchmark Delivery | `docs/phase0b/01_benchmark_lock.md` + `docs/phase0b/02_benchmark_results_template.md` | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
 | Trigger Audit Delivery | `docs/phase0b/03_trigger_audit_prereg.md` | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
-| OOS Freeze Declaration | `docs/phase0b/04_oos_and_sign_stability_prereg.md` | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
-| Bootstrap Sign-Stability Preregistration | `docs/phase0b/04_oos_and_sign_stability_prereg.md` | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
+| OOS Boundary Freeze | `docs/phase0b/04_oos_and_sign_stability_prereg.md` | PASS | PASS | 否 | PASS |
+| Bootstrap Sign-Stability Preregistration | `docs/phase0b/04_oos_and_sign_stability_prereg.md` | PASS | UNFILLED | 是 | UNFILLED |
 
 ## 4. Benchmark 完成状态
 
@@ -40,6 +40,7 @@
 | benchmark family 是否锁定 | UNFILLED | UNFILLED |
 | 模型阶数是否锁定 | UNFILLED | UNFILLED |
 | CRPS 分布族假设是否锁定 | UNFILLED | UNFILLED |
+| 2008 benchmark run 协议是否锁定 | UNFILLED | UNFILLED |
 | benchmark 结果表是否已填入真实结果 | UNFILLED | UNFILLED |
 | benchmark 结果是否仍含 `UNFILLED` | UNFILLED | UNFILLED |
 | 当前状态（PASS / FAIL / UNFILLED） | UNFILLED | UNFILLED |
@@ -48,6 +49,7 @@
 
 | 检查项 | 状态 | 备注 |
 |---|---|---|
+| trigger 纳入/排除决策是否在触碰原始数据前锁定 | UNFILLED | UNFILLED |
 | `L_max` 是否预注册 | UNFILLED | UNFILLED |
 | 合法 lead window 是否写死 | UNFILLED | UNFILLED |
 | false positive 口径是否锁定 | UNFILLED | UNFILLED |
@@ -55,7 +57,7 @@
 | 是否存在至少一个 pass 的合法 trigger | UNFILLED | UNFILLED |
 | 当前状态（PASS / FAIL / UNFILLED） | UNFILLED | UNFILLED |
 
-## 6. OOS freeze 完成状态
+## 6. OOS 边界冻结状态
 
 | 检查项 | 状态 | 备注 |
 |---|---|---|
@@ -63,7 +65,7 @@
 | 2000–2002 异质验证集是否冻结 | PASS | 已在协议中写死 |
 | 2020 使用边界是否冻结 | PASS | 已在协议中写死 |
 | Stage A 的 OOS 证据边界是否声明 | PASS | 已在协议中写死 |
-| 当前状态（PASS / FAIL / UNFILLED） | UNFILLED | UNFILLED |
+| 当前状态（PASS / FAIL） | PASS | OOS 边界文本已冻结 |
 
 ## 7. Bootstrap prereg 完成状态
 
@@ -110,9 +112,9 @@
 
 - Benchmark Delivery：`UNFILLED`
 - Trigger Audit Delivery：`UNFILLED`
-- OOS Freeze Declaration：`PARTIAL`（已有边界文本，但整体交付未完成）
+- OOS Boundary Freeze：`PASS`
 - Bootstrap Sign-Stability Preregistration：`UNFILLED`
 
 > 注意  
-> “PARTIAL” 只能作为说明，不能作为第 8 节的正式结论。  
+> OOS 边界冻结与 bootstrap 预注册是两个独立状态，不得合并解释。  
 > 第 8 节仍然只能使用那三条标准模板结论。
