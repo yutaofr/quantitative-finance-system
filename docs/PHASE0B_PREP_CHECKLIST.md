@@ -31,6 +31,7 @@
 - 模型清单
 - 每个模型的阶数
 - 误差分布设定
+- **CRPS 计算所依赖的预测分布族假设**
 - 是否允许 leverage / asymmetric term
 - 是否允许外生变量
 - 估计协议（MLE / 优化器 / 容差 / 收敛失败处理）
@@ -59,6 +60,7 @@
 
 - 不得在看到结果后替换 benchmark
 - 不得在看到结果后更改模型阶数
+- 不得在看到结果后更改 CRPS 所依赖的残差分布族假设
 - 不得用“更强 benchmark”或“更弱 benchmark”做事后调包
 
 ## 3. Trigger Audit Delivery
@@ -71,11 +73,11 @@
 
 在 trigger audit 开始之前，必须先预注册：
 
-- 拟议架构的执行延迟 `L`（交易日）
-- 合法 lead window = `{-L, ..., -1}`
+- **与具体架构形式无关的保守执行延迟上限** `L_max`（交易日）
+- 合法 lead window = `{-L_max, ..., -1}`
 - 常态窗 false positive 的计算方式
 
-若 `L` 未预注册，则整个 trigger audit 无效。
+若 `L_max` 未预注册，则整个 trigger audit 无效。未来任何架构若其有效执行延迟大于 `L_max`，则不得继承本轮 trigger audit 的合法性，必须重新审计。
 
 ### 3.3 审计对象
 
@@ -139,13 +141,16 @@
 - bootstrap 方案
 - block 长度或等价相关设置
 - 采样次数
+- **检验对象：`corr_next` 与 `rank_next` 是否都进入 sign-stability 审计，或分别采用何种通过阈值**
 - sign-stability 的通过阈值
 - 失败时的判定规则
+
+若 `corr_next` 与 `rank_next` 的阈值不相同，必须分别预注册；若只对其中一个做审计，也必须预先说明为什么另一个不构成独立稳健性要求。
 
 ### 5.3 禁令
 
 - 未预注册 sign-stability 阈值，不得进入 Phase 0B
-- 不得在看到 bootstrap 结果后再改 block 长度或通过阈值
+- 不得在看到 bootstrap 结果后再改 block 长度、检验对象或通过阈值
 
 ## 6. Phase 0B 启动门槛
 
@@ -173,7 +178,7 @@
 
 1. 锁 benchmark family
 2. 输出 benchmark diagnosis
-3. 预注册 trigger audit 的 `L`
+3. 预注册 trigger audit 的 `L_max`
 4. 完成 trigger audit
 5. 冻结 OOS 样本边界
 6. 预注册 bootstrap sign-stability
