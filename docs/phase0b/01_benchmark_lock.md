@@ -29,7 +29,7 @@
 | 字段 | 取值 | 状态 | 说明 |
 |---|---|---|---|
 | 评估阶段 | Phase 0A | LOCKED | 本轮 benchmark 仅服务于 Phase 0A：candidate = T5，benchmark = 预锁定连续模型 family |
-| benchmark family 名称 | UNFILLED | UNFILLED | 例如：EGARCH / GJR-GARCH / EGARCH-GJR |
+| benchmark family 名称 | EGARCH/GJR-GARCH(1,1) fixed benchmark family | LOCKED | 预锁定的连续 benchmark family |
 | 是否允许新增 benchmark | 否 | LOCKED | 结果出来后不得新增、替换、删减 |
 | 是否允许结果后更改 family | 否 | LOCKED | benchmark 不得成为结果导向下的可调对象 |
 
@@ -40,9 +40,10 @@
 
 | 模型名 | 是否启用 | 阶数(p,q) | 是否含 leverage/asymmetric | 是否允许外生变量 | 外生变量清单 | 误差分布 | 备注 |
 |---|---:|---|---|---|---|---|---|
-| EGARCH | UNFILLED | UNFILLED | UNFILLED | 否 | N/A | UNFILLED | UNFILLED |
-| GJR-GARCH | UNFILLED | UNFILLED | UNFILLED | 否 | N/A | UNFILLED | UNFILLED |
-| EGARCH-GJR 或等价备选 | UNFILLED | UNFILLED | UNFILLED | 否 | N/A | UNFILLED | UNFILLED |
+| EGARCH(1,1)-Normal | 是 | (1,1) | 是 | 否 | N/A | Normal | 与估计一致 |
+| EGARCH(1,1)-Student-t | 是 | (1,1) | 是 | 否 | N/A | Student-t | 与估计一致 |
+| GJR-GARCH(1,1)-Normal | 是 | (1,1) | 是 | 否 | N/A | Normal | 与估计一致 |
+| GJR-GARCH(1,1)-Student-t | 是 | (1,1) | 是 | 否 | N/A | Student-t | 与估计一致 |
 
 ### 模型锁定法理说明
 
@@ -59,9 +60,10 @@
 
 | 模型名 | 用于 CRPS 的预测分布族假设 | 是否与估计分布一致 | 若不一致，理由 | 状态 |
 |---|---|---|---|---|
-| EGARCH | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
-| GJR-GARCH | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
-| EGARCH-GJR 或等价备选 | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
+| EGARCH(1,1)-Normal | Normal | 是 | 无 | LOCKED |
+| EGARCH(1,1)-Student-t | Student-t | 是 | 无 | LOCKED |
+| GJR-GARCH(1,1)-Normal | Normal | 是 | 无 | LOCKED |
+| GJR-GARCH(1,1)-Student-t | Student-t | 是 | 无 | LOCKED |
 
 ### 禁令
 
@@ -72,13 +74,13 @@
 
 | 字段 | 取值 | 状态 | 说明 |
 |---|---|---|---|
-| 估计方法 | UNFILLED | UNFILLED | 例如 MLE |
-| 优化器 | UNFILLED | UNFILLED | 例如 BFGS / L-BFGS-B / SLSQP |
-| 收敛容差 | UNFILLED | UNFILLED | 必须在运行前写死 |
-| 最大迭代次数 | UNFILLED | UNFILLED | 必须在运行前写死 |
-| 收敛失败处理 | UNFILLED | UNFILLED | 例如：记为失败 / 重试规则 / 不重试 |
-| 数值异常处理 | UNFILLED | UNFILLED | 如 NaN / inf / 非正方差约束失败 |
-| 随机种子策略 | UNFILLED | UNFILLED | 若适用，必须锁定 |
+| 估计方法 | MLE | LOCKED | 逐窗口滚动估计 |
+| 优化器 | L-BFGS-B | LOCKED | 统一适用于四个 benchmark |
+| 收敛容差 | 1.0e-6 | LOCKED | 与 runner 一致 |
+| 最大迭代次数 | 200 | LOCKED | 与 runner 一致 |
+| 收敛失败处理 | 记为 FAILED_TO_RUN，不重试，不切换模型 | LOCKED | 若任一窗口失败，保留失败事实 |
+| 数值异常处理 | 记为 FAILED_TO_RUN | LOCKED | NaN / inf / 非正方差约束失败均视为失败 |
+| 随机种子策略 | 不适用（确定性优化，无随机性注入） | LOCKED | 不使用随机初始化 |
 
 ### 协议约束
 
@@ -101,12 +103,12 @@
 
 | 字段 | 取值 | 状态 | 说明 |
 |---|---|---|---|
-| 滚动方式 | UNFILLED | UNFILLED | expanding / rolling / fixed 等 |
-| 训练窗定义（2017/2018/2020） | UNFILLED | UNFILLED | 必须写清楚 |
-| 训练窗定义（2008 benchmark run） | UNFILLED | UNFILLED | 必须写清楚，且不得依赖 2008 之后的信息 |
-| 预测频率 | UNFILLED | UNFILLED | 日频 / 周频映射方式必须明确 |
-| 输出频率 | UNFILLED | UNFILLED | 与 T5 比较口径必须一致 |
-| 数据源 | UNFILLED | UNFILLED | 必须固定 |
+| 滚动方式 | rolling fixed-length window | LOCKED | 每个 as_of 仅使用其前 416 周训练样本，并施加 53 周 embargo |
+| 训练窗定义（2017/2018/2020） | as_of 往前回看 53 周后，再取更早的最后 416 周训练 | LOCKED | 仅使用 as_of 之前的历史周频样本 |
+| 训练窗定义（2008 benchmark run） | 同一 rolling fixed-length 口径；评估窗为 2008-01-04 -> 2008-12-26，训练信息集不得依赖 2008 之后信息 | LOCKED | 与 2017/2018/2020 完全同口径 |
+| 预测频率 | 周频 | LOCKED | 以 Friday close 对齐 |
+| 输出频率 | 周频 | LOCKED | 与 T5 比较口径一致 |
+| 数据源 | `data/raw/nasdaq/NASDAQXNDX/close.parquet` | LOCKED | 本地缓存的 NASDAQ XNDX 日度收盘数据 |
 
 ### 2008 benchmark run 的法理用途
 
@@ -135,37 +137,37 @@
 
 | 检查项 | 状态 | 备注 |
 |---|---|---|
-| benchmark family 是否完整列出 | UNFILLED | UNFILLED |
-| 每个模型的阶数是否写死 | UNFILLED | UNFILLED |
-| 是否允许 leverage/asymmetric 是否写死 | UNFILLED | UNFILLED |
-| 是否允许外生变量是否写死 | UNFILLED | UNFILLED |
-| CRPS 分布族假设是否写死 | UNFILLED | UNFILLED |
-| 优化器与容差是否写死 | UNFILLED | UNFILLED |
+| benchmark family 是否完整列出 | PASS | 四个模型已锁定 |
+| 每个模型的阶数是否写死 | PASS | 均为 (1,1) |
+| 是否允许 leverage/asymmetric 是否写死 | PASS | EGARCH/GJR 均已锁定 |
+| 是否允许外生变量是否写死 | PASS | 不允许 |
+| CRPS 分布族假设是否写死 | PASS | 与各模型 innovation distribution 一致 |
+| 优化器与容差是否写死 | PASS | L-BFGS-B / 1.0e-6 / maxiter=200 |
 | 四个固定窗口是否一致 | PASS | 已冻结 |
-| 2008 benchmark run 的训练信息集是否写死 | UNFILLED | 若否，则不得生成 `Benchmark_2008_std(z)` |
-| 滚动方式是否写死 | UNFILLED | UNFILLED |
-| 所有 `UNFILLED` 是否已清空 | UNFILLED | 若否，则不得运行 benchmark |
+| 2008 benchmark run 的训练信息集是否写死 | PASS | 与 2017/2018/2020 相同的 rolling fixed-length 口径 |
+| 滚动方式是否写死 | PASS | rolling fixed-length window |
+| 所有 `UNFILLED` 是否已清空 | PASS | 已清空 |
 
-## 10. 当前仍为 `UNFILLED` 的字段清单
+## 10. 当前已冻结字段清单
 
-> 本节必须在 benchmark 真正运行前清空。若仍保留 `UNFILLED`，则本文件不具执行资格。
+> 本节在 benchmark 真正运行前必须为空；当前已全部冻结完成。
 
-- benchmark family 名称：UNFILLED
-- 各模型是否启用：UNFILLED
-- 各模型阶数：UNFILLED
-- leverage/asymmetric 设定：UNFILLED
-- 外生变量设定：UNFILLED
-- 误差分布：UNFILLED
-- CRPS 分布族假设：UNFILLED
-- 估计方法：UNFILLED
-- 优化器：UNFILLED
-- 收敛容差：UNFILLED
-- 最大迭代次数：UNFILLED
-- 收敛失败处理：UNFILLED
-- 数值异常处理：UNFILLED
-- 滚动方式：UNFILLED
-- 训练窗定义（2017/2018/2020）：UNFILLED
-- 训练窗定义（2008 benchmark run）：UNFILLED
-- 预测频率：UNFILLED
-- 输出频率：UNFILLED
-- 数据源：UNFILLED
+- benchmark family 名称：EGARCH/GJR-GARCH(1,1) fixed benchmark family
+- 各模型是否启用：PASS
+- 各模型阶数：PASS（均为 (1,1)）
+- leverage/asymmetric 设定：PASS（EGARCH 与 GJR 均启用）
+- 外生变量设定：PASS（不允许）
+- 误差分布：PASS（Normal / Student-t）
+- CRPS 分布族假设：PASS（与各模型 innovation distribution 一致）
+- 估计方法：PASS（MLE）
+- 优化器：PASS（L-BFGS-B）
+- 收敛容差：PASS（1.0e-6）
+- 最大迭代次数：PASS（200）
+- 收敛失败处理：PASS（FAILED_TO_RUN，不重试，不替换模型）
+- 数值异常处理：PASS（FAILED_TO_RUN）
+- 滚动方式：PASS（rolling fixed-length window）
+- 训练窗定义（2017/2018/2020）：PASS（as_of 前 53 周 embargo，再取更早最后 416 周）
+- 训练窗定义（2008 benchmark run）：PASS（同一 rolling fixed-length 口径，不使用 2008 之后信息）
+- 预测频率：PASS（周频）
+- 输出频率：PASS（周频）
+- 数据源：PASS（`data/raw/nasdaq/NASDAQXNDX/close.parquet`）

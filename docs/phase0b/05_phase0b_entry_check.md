@@ -28,7 +28,7 @@
 
 | 前置交付 | 文件路径 | 是否已落盘 | 是否已冻结 | 是否仍有 `UNFILLED` | 当前状态 |
 |---|---|---|---|---|---|
-| Benchmark Delivery | `docs/phase0b/01_benchmark_lock.md` + `docs/phase0b/02_benchmark_results_template.md` | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
+| Benchmark Delivery | `docs/phase0b/01_benchmark_lock.md` + `docs/phase0b/02_benchmark_results_filled.md` | PASS | PASS | 否 | PASS |
 | Trigger Audit Delivery | `docs/phase0b/03_trigger_audit_prereg.md` | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
 | OOS Boundary Freeze | `docs/phase0b/04_oos_and_sign_stability_prereg.md` | PASS | PASS | 否 | PASS |
 | Bootstrap Sign-Stability Preregistration | `docs/phase0b/04_oos_and_sign_stability_prereg.md` | PASS | UNFILLED | 是 | UNFILLED |
@@ -37,13 +37,13 @@
 
 | 检查项 | 状态 | 备注 |
 |---|---|---|
-| benchmark family 是否锁定 | UNFILLED | UNFILLED |
-| 模型阶数是否锁定 | UNFILLED | UNFILLED |
-| CRPS 分布族假设是否锁定 | UNFILLED | UNFILLED |
-| 2008 benchmark run 协议是否锁定 | UNFILLED | UNFILLED |
-| benchmark 结果表是否已填入真实结果 | UNFILLED | UNFILLED |
-| benchmark 结果是否仍含 `UNFILLED` | UNFILLED | UNFILLED |
-| 当前状态（PASS / FAIL / UNFILLED） | UNFILLED | UNFILLED |
+| benchmark family 是否锁定 | PASS | 已锁定四模型 family |
+| 模型阶数是否锁定 | PASS | 均为 (1,1) |
+| CRPS 分布族假设是否锁定 | PASS | 与各模型 innovation distribution 一致 |
+| 2008 benchmark run 协议是否锁定 | PASS | rolling fixed-length，独立 2008 评估窗 |
+| benchmark 结果表是否已填入真实结果 | PASS | 结果已落盘至 `02_benchmark_results_filled.md` |
+| benchmark 结果是否仍含 `UNFILLED` | NO | 无关键 `UNFILLED` 残留 |
+| 当前状态（PASS / FAIL / UNFILLED） | PASS | Benchmark Delivery 已完成 |
 
 ## 5. Trigger audit 完成状态
 
@@ -91,13 +91,14 @@
 
 ### 当前结论
 
-`UNFILLED`
+`NO — prerequisite documents incomplete`
 
 ## 9. 若不具备，缺失项清单
 
 > 若第 8 节不是 YES，则必须逐项列出仍未完成的部分。
 
-- UNFILLED
+- Trigger Audit Delivery 未完成
+- Bootstrap Sign-Stability Preregistration 未完成
 
 ## 10. 禁止绕过条款
 
@@ -110,7 +111,7 @@
 
 > 在你还没有实际填写和冻结之前，默认状态应是：
 
-- Benchmark Delivery：`UNFILLED`
+- Benchmark Delivery：`PASS`
 - Trigger Audit Delivery：`UNFILLED`
 - OOS Boundary Freeze：`PASS`
 - Bootstrap Sign-Stability Preregistration：`UNFILLED`
