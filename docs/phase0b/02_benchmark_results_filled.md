@@ -37,13 +37,13 @@
 
 ## 3. T5 三窗口结果
 
-> 说明：本次 Benchmark Delivery 未找到可在仓库内复现 T5 三窗口结果的 artifact、runner 或命令。按执行规则，不能把仓库外上下文中的 T5 数字写成已复现结果，因此 T5 candidate-side 行保留为 `FAILED_TO_RUN`。
+> 说明：本轮新增 `src/research/run_phase0a_t5_reproduction.py` 做仓库内 T5 来源定位与复现检查。结果为 `FAILED_TO_RUN_MISSING_T5_SOURCE`：仓库内未找到指定 historical T5 pilot runner、`_fit_t5` / `_predict_t5`、T5 correction 结构、T5-specific 训练窗与最终 `sigma_t` 生成路径。详见 `docs/phase0b/02_t5_reproduction_note.md`。
 
 | 模型 | 窗口 | mean(z) | std(z) | corr_next | rank_next | lag1_acf(z) | sigma_blowup | pathology | CRPS | 状态 |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-| T5 | 2017-07-07 -> 2017-12-29 | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN |
-| T5 | 2018-07-06 -> 2018-12-28 | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN |
-| T5 | 2020-01-03 -> 2020-06-26 | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN |
+| T5 | 2017-07-07 -> 2017-12-29 | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE |
+| T5 | 2018-07-06 -> 2018-12-28 | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE |
+| T5 | 2020-01-03 -> 2020-06-26 | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE |
 
 ## 4. 四个 benchmark 的三窗口结果
 
@@ -105,19 +105,19 @@
 
 > 说明：
 > - 2020 列用于验证 benchmark 是否对 T5 形成材料性支配。
-> - T5 candidate-side 三窗口结果与 2008 结果均未由本次 runner 复现，因此依赖 T5 candidate-side 的比较字段均标记为 `FAILED_TO_RUN`。
+> - T5 candidate-side 三窗口结果与 2008 结果均无法由仓库内 T5 source 复现，因此依赖 T5 candidate-side 的比较字段均标记为 `FAILED_TO_RUN_MISSING_T5_SOURCE`。
 > - `Benchmark_2008_std(z)` 已冻结并可供后续 Phase 0A 条件 D 使用。
 
 | 比较对象 | 2020 std(z) | 2020 是否优于 T5 至少 0.05 且 >=2% | 2008 是否超过 Benchmark_2008_std(z)+0.10 | 安全/方向性是否不劣于 T5 | 是否形成材料性支配 | 备注 |
 |---|---:|---|---|---|---|---|
-| T5 vs EGARCH(1,1)-Normal | 0.810571 | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | T5 candidate-side 结果未由仓库 runner/artifact 复现 |
-| T5 vs EGARCH(1,1)-Student-t | 0.811930 | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | T5 candidate-side 结果未由仓库 runner/artifact 复现 |
-| T5 vs GJR-GARCH(1,1)-Normal | 1.341203 | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | T5 candidate-side 结果未由仓库 runner/artifact 复现 |
-| T5 vs GJR-GARCH(1,1)-Student-t | 1.272282 | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | FAILED_TO_RUN | T5 candidate-side 结果未由仓库 runner/artifact 复现 |
+| T5 vs EGARCH(1,1)-Normal | 0.810571 | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | T5 source 缺失，不能合法比较 |
+| T5 vs EGARCH(1,1)-Student-t | 0.811930 | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | T5 source 缺失，不能合法比较 |
+| T5 vs GJR-GARCH(1,1)-Normal | 1.341203 | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | T5 source 缺失，不能合法比较 |
+| T5 vs GJR-GARCH(1,1)-Student-t | 1.272282 | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | T5 source 缺失，不能合法比较 |
 
 ### 6.1 材料性支配判定
 
-- 本次交付不能合法判定 benchmark 是否相对 T5 形成材料性支配，因为 T5 candidate-side 结果未由仓库内 artifact 或 runner 复现。
+- 本次交付不能合法判定 benchmark 是否相对 T5 形成材料性支配，因为 T5 candidate-side 缺少仓库内可执行 source。
 - benchmark 自身的 2020 表现已完整落盘，其中最低 2020 `std(z)` 来自 `EGARCH(1,1)-Normal`。
 - `Benchmark_2008_std(z)` 已合法冻结，供后续补齐 candidate-side 对照使用。
 
@@ -126,15 +126,15 @@
 | 分支 | 当前占位判断 | 依据 | 当前状态 |
 |---|---|---|---|
 | 分支一：T5 特有缺陷 | NO | 2008 上 benchmark family 未保持最低绝对可用性，故不能据此证明 T5 特有缺陷 | NO |
-| 分支二：连续危机波动模型共同上限 | PENDING | T5 candidate-side 判定未由仓库 runner/artifact 复现，不能完成对称分支裁决 | PENDING |
+| 分支二：连续危机波动模型共同上限 | PENDING | T5 source 缺失，T5 的协议判定结果无法复现 | PENDING |
 | 分支三：危机样本异质，不支持统一危机层 | YES | benchmark family 在 2020 与 2008 呈断裂式异质表现：2020 正方向且无 blowup，2008 方向性倒置 | YES |
-| 分支四：T5 Success 但被 benchmark 材料性支配 | PENDING | T5 candidate-side 结果未由仓库 runner/artifact 复现，不能合法完成材料性支配判定 | PENDING |
-| 分支五：T5 足够，无需继续修补 | PENDING | T5 candidate-side 判定未由仓库 runner/artifact 复现 | PENDING |
+| 分支四：T5 Success 但被 benchmark 材料性支配 | PENDING | T5 source 缺失，不能判定 T5 是否 Success 或是否被材料性支配 | PENDING |
+| 分支五：T5 足够，无需继续修补 | PENDING | T5 source 缺失，不能判定 T5 是否 Success | PENDING |
 
 ### 7.1 当前最稳妥的占位判断
 
 - 当前 benchmark delivery 能直接支持的，是 benchmark family 自身的 2020/2008 异质表现。
-- 任何依赖 T5 candidate-side 的分支仍需补齐可复现的 T5 artifact 或 runner。
+- 任何依赖 T5 candidate-side 的分支仍需补齐 T5 可执行 source；当前状态为 `FAILED_TO_RUN_MISSING_T5_SOURCE`。
 
 ## 8. 当前是否完成 Benchmark Delivery
 
@@ -163,7 +163,7 @@
 ### 证据边界
 
 - 本文只冻结 benchmark delivery 的实际结果。
-- T5 candidate-side 三窗口与 2008 结果未在本次 benchmark delivery 中重跑，也未找到可引用的仓库 artifact 或命令，因此相关对照字段保留为 `FAILED_TO_RUN`。
+- T5 candidate-side 三窗口与 2008 结果无法由仓库内 T5 source 复现，因此相关对照字段保留为 `FAILED_TO_RUN_MISSING_T5_SOURCE`。
 - 本文不负责 trigger audit。
 - 本文不负责 bootstrap sign-stability 阈值预注册。
 - 本文不提供 crisis architecture 的立项批准。

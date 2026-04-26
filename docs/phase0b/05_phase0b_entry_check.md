@@ -42,8 +42,9 @@
 | CRPS 分布族假设是否锁定 | PASS | 与各模型 innovation distribution 一致 |
 | 2008 benchmark run 协议是否锁定 | PASS | rolling fixed-length，独立 2008 评估窗 |
 | benchmark 结果表是否已填入真实结果 | PASS | 结果已落盘至 `02_benchmark_results_filled.md` |
+| T5 candidate-side 是否可仓库内复现 | FAIL | `02_t5_reproduction_note.md` 已落盘；当前为 `FAILED_TO_RUN_MISSING_T5_SOURCE` |
 | benchmark 结果是否仍含 `UNFILLED` | NO | 无关键 `UNFILLED` 残留 |
-| 当前状态（PASS / FAIL / UNFILLED） | PASS | Benchmark Delivery 已完成 |
+| 当前状态（PASS / FAIL / UNFILLED） | PASS | Benchmark Delivery 已完成；T5 candidate-side 仍不可复现 |
 
 ## 5. Trigger audit 完成状态
 
@@ -99,6 +100,7 @@
 
 - Trigger Audit Delivery 已完成但未产生合法 trigger
 - Bootstrap Sign-Stability Preregistration 已完成（结果填报仍待后续执行）
+- T5 candidate-side 仍为 `FAILED_TO_RUN_MISSING_T5_SOURCE`
 
 ## 10. 禁止绕过条款
 
