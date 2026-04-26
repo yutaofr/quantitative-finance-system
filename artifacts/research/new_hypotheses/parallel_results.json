@@ -1,0 +1,283 @@
+{
+  "baselines": {
+    "EGARCH_NORMAL": {
+      "Window_2017": {
+        "corr_next": 0.530067,
+        "crps": 0.061159,
+        "rank_next": 0.504615,
+        "std_z": 1.702306
+      },
+      "Window_2018": {
+        "corr_next": -0.485068,
+        "crps": 0.09561,
+        "rank_next": -0.580769,
+        "std_z": 2.177269
+      },
+      "Window_2020": {
+        "corr_next": 0.412949,
+        "crps": 0.160771,
+        "rank_next": 0.362308,
+        "std_z": 0.810571
+      }
+    },
+    "OLD_FAILED_OPTION_2A_B": {
+      "Window_2017": {
+        "corr_next": 0.015043,
+        "crps": 0.086197,
+        "rank_next": 0.051538,
+        "std_z": 1.087309
+      },
+      "Window_2018": {
+        "corr_next": -0.158647,
+        "crps": 0.067559,
+        "rank_next": 0.077692,
+        "std_z": 1.189256
+      },
+      "Window_2020": {
+        "corr_next": -0.287052,
+        "crps": 0.054682,
+        "rank_next": -0.263478,
+        "std_z": 1.02691
+      }
+    },
+    "T5": {
+      "Window_2017": {
+        "corr_next": 0.629802,
+        "crps": 0.086197,
+        "rank_next": 0.776923,
+        "std_z": 2.010464
+      },
+      "Window_2018": {
+        "corr_next": 0.386938,
+        "crps": 0.067559,
+        "rank_next": 0.535385,
+        "std_z": 1.976233
+      },
+      "Window_2020": {
+        "corr_next": -0.033011,
+        "crps": 0.054682,
+        "rank_next": 0.02,
+        "std_z": 2.38005
+      }
+    }
+  },
+  "candidates": {
+    "A_DIRECT_DENSITY": {
+      "aggregate": {
+        "egarch_scale_margin_min": -0.269172862443378,
+        "material_improvement_score": -0.618128183022806,
+        "mean_crps": 0.11242646740430255,
+        "no_blowup": true,
+        "no_pathology": true,
+        "t5_direction_margin_min": -0.8817502719287924
+      },
+      "protocol_pass": false,
+      "single_line_decision": "FAILED",
+      "windows": {
+        "Window_2017": {
+          "corr_next": 0.09597189274532505,
+          "crps": 0.06027665865801164,
+          "lag1_acf_z": 0.9188586483388298,
+          "mean_z": 0.575405198431962,
+          "n_obs": 26,
+          "pathology": 0,
+          "rank_next": 0.15307692307692308,
+          "sigma_blowup": 0,
+          "std_z": 1.8463783885488785
+        },
+        "Window_2018": {
+          "corr_next": -0.4948122719287924,
+          "crps": 0.05617421563502738,
+          "lag1_acf_z": 0.9092596802364142,
+          "mean_z": -0.2234102146039773,
+          "n_obs": 26,
+          "pathology": 0,
+          "rank_next": -0.3123076923076923,
+          "sigma_blowup": 0,
+          "std_z": 1.912996162911338
+        },
+        "Window_2020": {
+          "corr_next": -0.21522775970230898,
+          "crps": 0.2208285279198686,
+          "lag1_acf_z": 0.7314216824763455,
+          "mean_z": 5.56782647974617,
+          "n_obs": 26,
+          "pathology": 0,
+          "rank_next": -0.14923076923076922,
+          "sigma_blowup": 0,
+          "std_z": 1.429743862443378
+        }
+      }
+    },
+    "B_DIRECT_QUANTILES": {
+      "aggregate": {
+        "egarch_scale_margin_min": -867.426695288245,
+        "material_improvement_score": -0.5596672871972729,
+        "mean_crps": 0.10836464333627506,
+        "no_blowup": true,
+        "no_pathology": true,
+        "t5_direction_margin_min": -1.629802
+      },
+      "protocol_pass": false,
+      "single_line_decision": "FAILED",
+      "windows": {
+        "Window_2017": {
+          "corr_next": -1.0,
+          "crps": 0.06469506637356734,
+          "lag1_acf_z": 0.9211793988894944,
+          "mean_z": 282.6708746108692,
+          "n_obs": 26,
+          "pathology": 0,
+          "rank_next": -1.0,
+          "sigma_blowup": 0,
+          "std_z": 859.6744291428449
+        },
+        "Window_2018": {
+          "corr_next": -1.0,
+          "crps": 0.061555715645972515,
+          "lag1_acf_z": 0.9045794073981311,
+          "mean_z": -146.90326220845603,
+          "n_obs": 26,
+          "pathology": 0,
+          "rank_next": -1.0,
+          "sigma_blowup": 0,
+          "std_z": 869.9539642882451
+        },
+        "Window_2020": {
+          "corr_next": -1.0,
+          "crps": 0.19884314798928535,
+          "lag1_acf_z": 0.6762300294619463,
+          "mean_z": 2485.5393498660665,
+          "n_obs": 26,
+          "pathology": 0,
+          "rank_next": -1.0,
+          "sigma_blowup": 0,
+          "std_z": 589.4659873824992
+        }
+      }
+    },
+    "C_DECOUPLED_HEADS": {
+      "aggregate": {
+        "egarch_scale_margin_min": -0.01935277985590833,
+        "material_improvement_score": -0.6161158367374543,
+        "mean_crps": 0.1122866509259605,
+        "no_blowup": true,
+        "no_pathology": true,
+        "t5_direction_margin_min": -0.9144843086015795
+      },
+      "protocol_pass": false,
+      "single_line_decision": "FAILED",
+      "windows": {
+        "Window_2017": {
+          "corr_next": -0.2846823086015795,
+          "crps": 0.06040505654770859,
+          "lag1_acf_z": 0.9298214628847581,
+          "mean_z": -0.09916633167561589,
+          "n_obs": 26,
+          "pathology": 0,
+          "rank_next": -0.21615384615384614,
+          "sigma_blowup": 0,
+          "std_z": 2.0716587798559085
+        },
+        "Window_2018": {
+          "corr_next": -0.4298401273570106,
+          "crps": 0.06440670840910839,
+          "lag1_acf_z": 0.9145663329565298,
+          "mean_z": -0.7270662397888028,
+          "n_obs": 26,
+          "pathology": 0,
+          "rank_next": -0.3946153846153846,
+          "sigma_blowup": 0,
+          "std_z": 1.5090227346486922
+        },
+        "Window_2020": {
+          "corr_next": 0.46463797148166885,
+          "crps": 0.21204818782106452,
+          "lag1_acf_z": 0.6030342672700321,
+          "mean_z": 4.810864875673512,
+          "n_obs": 26,
+          "pathology": 0,
+          "rank_next": 0.45,
+          "sigma_blowup": 0,
+          "std_z": 1.0668062445663256
+        }
+      }
+    },
+    "D_LATENT_STATE": {
+      "aggregate": {
+        "egarch_scale_margin_min": 0.10933398559975815,
+        "material_improvement_score": -0.35396796971647787,
+        "mean_crps": 0.09407279189058775,
+        "no_blowup": true,
+        "no_pathology": true,
+        "t5_direction_margin_min": -1.260628971675259
+      },
+      "protocol_pass": false,
+      "single_line_decision": "FAILED",
+      "windows": {
+        "Window_2017": {
+          "corr_next": -0.6308269716752591,
+          "crps": 0.04686892040377323,
+          "lag1_acf_z": 0.8702527223706205,
+          "mean_z": -0.28882435543899376,
+          "n_obs": 26,
+          "pathology": 0,
+          "rank_next": -0.6215384615384615,
+          "sigma_blowup": 0,
+          "std_z": 0.7397037118428497
+        },
+        "Window_2018": {
+          "corr_next": 0.15769021021055105,
+          "crps": 0.059354393348576354,
+          "lag1_acf_z": 0.9381620880437108,
+          "mean_z": -0.2598261221779406,
+          "n_obs": 26,
+          "pathology": 0,
+          "rank_next": 0.25534622758492714,
+          "sigma_blowup": 0,
+          "std_z": 1.0378562206183695
+        },
+        "Window_2020": {
+          "corr_next": -0.16842550558186337,
+          "crps": 0.1759950619194136,
+          "lag1_acf_z": 0.7955017394195096,
+          "mean_z": 3.0765316371021787,
+          "n_obs": 26,
+          "pathology": 0,
+          "rank_next": -0.1946153846153846,
+          "sigma_blowup": 0,
+          "std_z": 1.0512370144002419
+        }
+      }
+    }
+  },
+  "final_decision": {
+    "invalid": [],
+    "overall_decision": "NO_MODEL_WORTH_CONTINUING",
+    "winner": null
+  },
+  "forecast_horizon_weeks": 52,
+  "hypotheses": [
+    "A_DIRECT_DENSITY",
+    "B_DIRECT_QUANTILES",
+    "C_DECOUPLED_HEADS",
+    "D_LATENT_STATE"
+  ],
+  "material_improvement_min": 0.03,
+  "train_embargo_weeks": 53,
+  "train_window_weeks": 416,
+  "windows": {
+    "Window_2017": [
+      "2017-07-07",
+      "2017-12-29"
+    ],
+    "Window_2018": [
+      "2018-07-06",
+      "2018-12-28"
+    ],
+    "Window_2020": [
+      "2020-01-03",
+      "2020-06-26"
+    ]
+  }
+}
