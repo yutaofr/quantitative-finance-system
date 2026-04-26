@@ -1,0 +1,7 @@
+| object | n_obs | corr_forward_return | corr_forward_risk | balanced_accuracy | worst_window_corr_composite | layer_1 | layer_2 | layer_3 | overall |
+|---|---|---|---|---|---|---|---|---|---|
+| CONSTANT_NEUTRAL_BASELINE | 2065 | nan | nan | 0.333333 | nan | FAIL | FAIL | FAIL | FAIL |
+| SIMPLE_26W_TREND_BASELINE | 2065 | 0.088123 | -0.117031 | 0.327386 | -0.914612 | PASS | FAIL | FAIL | PARTIAL |
+| SIMPLE_13W_VOL_BASELINE | 2065 | 0.261514 | -0.472605 | 0.386486 | -0.963128 | PASS | FAIL | FAIL | PARTIAL |
+| T5_DERIVED_CYCLE_PROXY | 77 | 0.009592 | -0.133948 | 0.364495 | -0.592904 | PASS | FAIL | FAIL | PARTIAL |
+| EGARCH_DERIVED_CYCLE_PROXY | 78 | -0.193822 | 0.435191 | 0.248578 | -0.872399 | PASS | FAIL | FAIL | PARTIAL |

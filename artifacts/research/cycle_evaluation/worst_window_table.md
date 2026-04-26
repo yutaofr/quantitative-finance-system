@@ -1,0 +1,7 @@
+| object | worst_window_corr_composite | dispersion |
+|---|---|---|
+| CONSTANT_NEUTRAL_BASELINE | nan | nan |
+| SIMPLE_26W_TREND_BASELINE | -0.914612 | 0.451925 |
+| SIMPLE_13W_VOL_BASELINE | -0.963128 | 0.485721 |
+| T5_DERIVED_CYCLE_PROXY | -0.592904 | 0.572396 |
+| EGARCH_DERIVED_CYCLE_PROXY | -0.872399 | 0.472937 |
