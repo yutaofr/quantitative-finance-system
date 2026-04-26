@@ -29,7 +29,7 @@
 | 前置交付 | 文件路径 | 是否已落盘 | 是否已冻结 | 是否仍有 `UNFILLED` | 当前状态 |
 |---|---|---|---|---|---|
 | Benchmark Delivery | `docs/phase0b/01_benchmark_lock.md` + `docs/phase0b/02_benchmark_results_filled.md` | PASS | PASS | 否 | PASS |
-| Trigger Audit Delivery | `docs/phase0b/03_trigger_audit_prereg.md` | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
+| Trigger Audit Delivery | `docs/phase0b/03_trigger_audit_prereg.md` + `docs/phase0b/03_trigger_audit_results_filled.md` | PASS | PASS | 否 | FAIL |
 | OOS Boundary Freeze | `docs/phase0b/04_oos_and_sign_stability_prereg.md` | PASS | PASS | 否 | PASS |
 | Bootstrap Sign-Stability Preregistration | `docs/phase0b/04_oos_and_sign_stability_prereg.md` | PASS | UNFILLED | 是 | UNFILLED |
 
@@ -49,13 +49,13 @@
 
 | 检查项 | 状态 | 备注 |
 |---|---|---|
-| trigger 纳入/排除决策是否在触碰原始数据前锁定 | UNFILLED | UNFILLED |
-| `L_max` 是否预注册 | UNFILLED | UNFILLED |
-| 合法 lead window 是否写死 | UNFILLED | UNFILLED |
-| false positive 口径是否锁定 | UNFILLED | UNFILLED |
-| trigger 审计结果是否已填入 | UNFILLED | UNFILLED |
-| 是否存在至少一个 pass 的合法 trigger | UNFILLED | UNFILLED |
-| 当前状态（PASS / FAIL / UNFILLED） | UNFILLED | UNFILLED |
+| trigger 纳入/排除决策是否在触碰原始数据前锁定 | PASS | 七个候选全部纳入审计，状态已锁定 |
+| `L_max` 是否预注册 | PASS | `L_max = 5` 个交易日 |
+| 合法 lead window 是否写死 | PASS | `{-5, -4, -3, -2, -1}` 交易日 |
+| false positive 口径是否锁定 | PASS | calm regime、前 20% 极端区间与 `<= 0.40` 门槛均已锁定 |
+| trigger 审计结果是否已填入 | PASS | 结果已落盘至 `03_trigger_audit_results_filled.md` |
+| 是否存在至少一个 pass 的合法 trigger | FAIL | 当前合法 `PASS` trigger 数量为 0 |
+| 当前状态（PASS / FAIL / UNFILLED） | FAIL | Trigger Audit Delivery 已完成，但未产生合法 trigger |
 
 ## 6. OOS 边界冻结状态
 
@@ -97,7 +97,7 @@
 
 > 若第 8 节不是 YES，则必须逐项列出仍未完成的部分。
 
-- Trigger Audit Delivery 未完成
+- Trigger Audit Delivery 已完成但未产生合法 trigger
 - Bootstrap Sign-Stability Preregistration 未完成
 
 ## 10. 禁止绕过条款
@@ -112,7 +112,7 @@
 > 在你还没有实际填写和冻结之前，默认状态应是：
 
 - Benchmark Delivery：`PASS`
-- Trigger Audit Delivery：`UNFILLED`
+- Trigger Audit Delivery：`FAIL`
 - OOS Boundary Freeze：`PASS`
 - Bootstrap Sign-Stability Preregistration：`UNFILLED`
 
