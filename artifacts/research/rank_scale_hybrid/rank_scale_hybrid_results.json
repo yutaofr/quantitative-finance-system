@@ -1,0 +1,178 @@
+{
+  "candidate_models": [
+    "hybrid_quantile_map_zero_param",
+    "hybrid_compressed_quantile_map_alpha_0_50"
+  ],
+  "diagnostics": {
+    "Window_2017": {
+      "EGARCH(1,1)-Normal": {
+        "corr_next": 0.53006652778749,
+        "crps": 0.06115924601270609,
+        "decision": "PARTIAL_FAIL_SCALE",
+        "lag1_acf_z": 0.9094910150280286,
+        "mean_z": -0.47419007370030913,
+        "n_obs": 26,
+        "pathology": 0,
+        "rank_next": 0.5046153846153847,
+        "sigma_blowup": 0,
+        "std_z": 1.702306478534869
+      },
+      "T5_resid_persistence_M4": {
+        "corr_next": 0.6298021122236612,
+        "crps": 0.08619732668819104,
+        "decision": "PARTIAL_FAIL_SCALE",
+        "lag1_acf_z": 0.9233948967975658,
+        "mean_z": 1.743953649944412,
+        "n_obs": 26,
+        "pathology": 0,
+        "rank_next": 0.776303149578552,
+        "sigma_blowup": 0,
+        "std_z": 2.0104639931369443
+      },
+      "hybrid_compressed_quantile_map_alpha_0_50": {
+        "corr_next": -0.7536751205328036,
+        "crps": 0.06497502927820077,
+        "decision": "FULL_FAIL",
+        "lag1_acf_z": 0.9289139626001016,
+        "mean_z": -1.0432584892057366,
+        "n_obs": 26,
+        "pathology": 0,
+        "rank_next": -0.7420657956080411,
+        "sigma_blowup": 0,
+        "std_z": 2.2493747299549676
+      },
+      "hybrid_quantile_map_zero_param": {
+        "corr_next": -0.7445161455791797,
+        "crps": 0.06736479440074902,
+        "decision": "FULL_FAIL",
+        "lag1_acf_z": 0.9132153525601673,
+        "mean_z": -1.4847612160014405,
+        "n_obs": 26,
+        "pathology": 0,
+        "rank_next": -0.7420657956080411,
+        "sigma_blowup": 0,
+        "std_z": 2.8510349677650577
+      }
+    },
+    "Window_2018": {
+      "EGARCH(1,1)-Normal": {
+        "corr_next": -0.48506789308945014,
+        "crps": 0.09560986720019177,
+        "decision": "FULL_FAIL",
+        "lag1_acf_z": 0.9390494788223666,
+        "mean_z": -2.5072279030795572,
+        "n_obs": 26,
+        "pathology": 0,
+        "rank_next": -0.5807692307692308,
+        "sigma_blowup": 8,
+        "std_z": 2.177269023276379
+      },
+      "T5_resid_persistence_M4": {
+        "corr_next": 0.386938044229677,
+        "crps": 0.06755889897535745,
+        "decision": "PARTIAL_FAIL_SCALE",
+        "lag1_acf_z": 0.8424045010228237,
+        "mean_z": -1.8804064279783637,
+        "n_obs": 26,
+        "pathology": 0,
+        "rank_next": 0.5353846153846153,
+        "sigma_blowup": 0,
+        "std_z": 1.9762333604709292
+      },
+      "hybrid_compressed_quantile_map_alpha_0_50": {
+        "corr_next": 0.6299228899259647,
+        "crps": 0.08962828942166164,
+        "decision": "FULL_FAIL",
+        "lag1_acf_z": 0.8549371747406361,
+        "mean_z": -1.4488980262085214,
+        "n_obs": 26,
+        "pathology": 0,
+        "rank_next": 0.536923076923077,
+        "sigma_blowup": 1,
+        "std_z": 2.175198388241813
+      },
+      "hybrid_quantile_map_zero_param": {
+        "corr_next": 0.6069220357897397,
+        "crps": 0.08399522481456938,
+        "decision": "FULL_FAIL",
+        "lag1_acf_z": 0.7869409788719527,
+        "mean_z": -1.0867961235743688,
+        "n_obs": 26,
+        "pathology": 0,
+        "rank_next": 0.536923076923077,
+        "sigma_blowup": 8,
+        "std_z": 2.2231785258769268
+      }
+    },
+    "Window_2020": {
+      "EGARCH(1,1)-Normal": {
+        "corr_next": 0.3449314588928873,
+        "crps": 0.15822073288191915,
+        "decision": "SUCCESS",
+        "lag1_acf_z": 0.5164729367644963,
+        "mean_z": 2.394476876636667,
+        "n_obs": 25,
+        "pathology": 0,
+        "rank_next": 0.31478260869565217,
+        "sigma_blowup": 0,
+        "std_z": 0.8200153989501527
+      },
+      "T5_resid_persistence_M4": {
+        "corr_next": -0.033010691246943634,
+        "crps": 0.05468213209254711,
+        "decision": "FULL_FAIL",
+        "lag1_acf_z": 0.7579614655073839,
+        "mean_z": 1.0576136285848328,
+        "n_obs": 25,
+        "pathology": 0,
+        "rank_next": 0.02,
+        "sigma_blowup": 0,
+        "std_z": 2.380049566776613
+      },
+      "hybrid_compressed_quantile_map_alpha_0_50": {
+        "corr_next": -0.0024921340610130458,
+        "crps": 0.16157761685869435,
+        "decision": "PARTIAL_FAIL_DIRECTION",
+        "lag1_acf_z": 0.7389823716764837,
+        "mean_z": 2.492663983992739,
+        "n_obs": 25,
+        "pathology": 0,
+        "rank_next": 0.09565217391304347,
+        "sigma_blowup": 0,
+        "std_z": 0.8753403092386322
+      },
+      "hybrid_quantile_map_zero_param": {
+        "corr_next": -0.028351327749776042,
+        "crps": 0.16084881089621075,
+        "decision": "PARTIAL_FAIL_DIRECTION",
+        "lag1_acf_z": 0.6093293170281169,
+        "mean_z": 2.4859954577457155,
+        "n_obs": 25,
+        "pathology": 0,
+        "rank_next": 0.09565217391304347,
+        "sigma_blowup": 0,
+        "std_z": 0.9482512251979985
+      }
+    }
+  },
+  "final_decision": {
+    "hybrid_compressed_quantile_map_alpha_0_50": "FAIL",
+    "hybrid_quantile_map_zero_param": "FAIL"
+  },
+  "hypothesis": "T5 rank ordering plus EGARCH-Normal scale calibration",
+  "preregistration": "docs/rank_scale_hybrid/02_preregistration.md",
+  "windows": {
+    "Window_2017": [
+      "2017-07-07",
+      "2017-12-29"
+    ],
+    "Window_2018": [
+      "2018-07-06",
+      "2018-12-28"
+    ],
+    "Window_2020": [
+      "2020-01-03",
+      "2020-06-26"
+    ]
+  }
+}

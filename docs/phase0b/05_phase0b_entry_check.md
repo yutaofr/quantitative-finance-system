@@ -1,19 +1,27 @@
-# Phase 0B 入场检查文档
+# Phase 0B 终止声明与入场检查文档
 
 > 文档性质  
-> 本文不是结果结论书，而是是否具备进入 Phase 0B 资格的总闸门检查表。  
-> 本文只回答一个问题：前置条件是否全部完成并冻结。
+> 本文是 Phase 0B crisis architecture 路线的终止声明，同时保留原入场检查表作为审计证据。  
+> 本文只回答一个问题：Phase 0B 是否仍具备立项资格。
+
+## 0. 当前法定状态
+
+`Phase 0B = CLOSED`
+
+关闭原因：`trigger audit completed FAIL; research line archived`
+
+这不是“待后续推进”状态。Trigger Audit Delivery 已完成且失败，合法 `PASS trigger = 0`。因此 Phase 0B 的 trigger / override / hard switch / MoE 路线正式终止。
 
 ## 1. 文档目的
 
-本文件用于在任何人提出进入 Phase 0B 之前，先统一检查：
+本文件用于记录 Phase 0B 入场条件为何未满足，并固定旧路线终止边界：
 
 1. benchmark 是否已锁定并交付  
 2. trigger audit 是否已预注册并完成  
 3. OOS 样本边界是否已冻结  
 4. bootstrap sign-stability 是否已预注册  
 
-若任一项不完整，则默认不得进入 Phase 0B。
+若任一项不完整或失败，则不得进入 Phase 0B。当前不是“不完整”，而是 Trigger Audit Delivery 已完成但结论为 `FAIL`。
 
 ## 2. Phase 0B 法定入场条件
 
@@ -92,15 +100,16 @@
 
 ### 当前结论
 
-`NO — trigger audit completed but FAIL`
+`NO — trigger audit completed but FAIL; research line archived`
 
 ## 9. 若不具备，缺失项清单
 
 > 若第 8 节不是 YES，则必须逐项列出仍未完成的部分。
 
 - Trigger Audit Delivery 已完成但未产生合法 trigger
-- Bootstrap Sign-Stability Preregistration 已完成（结果填报仍待后续执行）
+- Bootstrap Sign-Stability Preregistration 已完成；不再作为 Phase 0B 后续跑批授权
 - 2008 T5 candidate-side 已同口径尝试运行并失败，主因已裁决为 `UPSTREAM_DATA_EDGE_CASE_CONFIRMED`；不影响 trigger audit 失败结论
+- Phase 0A 已归档；旧 crisis architecture research line 已关闭
 
 ## 10. 禁止绕过条款
 
@@ -108,6 +117,8 @@
 2. 不得因为某项文档已落盘就视为已冻结。  
 3. 不得因为单个结果好看就跳过其他前置交付。  
 4. 不得在 `UNFILLED` 仍大量存在时宣布进入 Phase 0B。  
+5. 不得将 rank-scale hybrid 新假说解释为 Phase 0B 的恢复。  
+6. 不得在 trigger audit 已完成且 `FAIL` 后继续寻找新 trigger、override、hard switch 或 MoE。  
 
 ## 11. 当前四项前置交付默认状态
 
@@ -120,4 +131,10 @@
 
 > 注意  
 > OOS 边界冻结与 bootstrap 预注册是两个独立状态，不得合并解释。  
-> 第 8 节仍然只能使用那三条标准模板结论。
+> 第 8 节保留原标准模板语义，但当前状态已扩展为终止声明：`NO — trigger audit completed but FAIL; research line archived`。
+
+## 12. 与 rank-scale hybrid 新研究线的边界
+
+rank-scale hybrid 是独立新假说，不继承 Phase 0B 的 trigger 入场条件，也不恢复 Phase 0B。其研究对象是 T5 的 ordinal ordering 与 EGARCH-Normal 的 cardinal calibration 能否在低自由度 `sigma_t` 中共存。
+
+该新线禁止使用 trigger、crisis regime classifier、override、hard switch 或 MoE。即使新线成功，允许进入的也只能是 tail family / joint MLE 前的下一阶段，而不是旧 Phase 0B 的恢复。

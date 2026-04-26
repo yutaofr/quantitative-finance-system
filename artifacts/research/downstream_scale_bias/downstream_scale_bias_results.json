@@ -1,0 +1,42 @@
+{
+  "decision": {
+    "failed_conditions": [],
+    "k_max": 2.748824988735935,
+    "k_min": 2.6042501888136225,
+    "k_range": 0.14457479992231237,
+    "option_1_decision": "SUCCESS",
+    "positive_loglik_improvement_windows": 3,
+    "total_loglik_improvement": 108.72534241521805
+  },
+  "fits": {
+    "Window_2017": {
+      "central_80_coverage": 0.8461538461538461,
+      "central_90_coverage": 1.0,
+      "k": 2.682572479382604,
+      "loglik": -62.444353611270856,
+      "naive_loglik": -102.8383819457216,
+      "naive_nu": 5.209139578555789,
+      "nu": 100.0
+    },
+    "Window_2018": {
+      "central_80_coverage": 0.8846153846153846,
+      "central_90_coverage": 1.0,
+      "k": 2.748824988735935,
+      "loglik": -63.08205960206852,
+      "naive_loglik": -105.21629445793009,
+      "naive_nu": 5.120159847044379,
+      "nu": 100.0
+    },
+    "Window_2020": {
+      "central_80_coverage": 0.88,
+      "central_90_coverage": 0.96,
+      "k": 2.6042501888136225,
+      "loglik": -59.395706945960214,
+      "naive_loglik": -85.59278617086595,
+      "naive_nu": 4.953560092179316,
+      "nu": 54.56481868109137
+    }
+  },
+  "known_2020_direction_risk": "corr_next = -0.033011",
+  "preregistration": "docs/rank_scale_hybrid/05_downstream_scale_bias_preregistration.md"
+}
