@@ -42,9 +42,9 @@
 | CRPS 分布族假设是否锁定 | PASS | 与各模型 innovation distribution 一致 |
 | 2008 benchmark run 协议是否锁定 | PASS | rolling fixed-length，独立 2008 评估窗 |
 | benchmark 结果表是否已填入真实结果 | PASS | 结果已落盘至 `02_benchmark_results_filled.md` |
-| T5 candidate-side 是否可仓库内复现 | PARTIAL | 原始 `T5_resid_persistence_M4` 三窗口已复现；2008 candidate-side 同口径运行失败为 `FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS` |
+| T5 candidate-side 是否可仓库内复现 | PARTIAL_WITH_ROOT_CAUSE | 原始 `T5_resid_persistence_M4` 三个 pilot 窗口已复现；2008 同口径失败已定位为 `UPSTREAM_DATA_EDGE_CASE_CONFIRMED` |
 | benchmark 结果是否仍含 `UNFILLED` | NO | 无关键 `UNFILLED` 残留 |
-| 当前状态（PASS / FAIL / UNFILLED） | PASS | Benchmark Delivery 已完成；T5 三窗口可复现，2008 T5 failure 已落盘 |
+| 当前状态（PASS / FAIL / UNFILLED） | PASS | Benchmark Delivery 已完成；T5 源码已对齐，三窗口可复现，2008 T5 上游数据边界 failure 已落盘 |
 
 ## 5. Trigger audit 完成状态
 
@@ -86,13 +86,13 @@
 
 ### 标准结论模板
 
-- `NO — prerequisite documents incomplete`
+- `NO — trigger audit completed but FAIL`
 - `NO — documents present but still contain UNFILLED critical fields`
 - `YES — all prerequisite conditions frozen`
 
 ### 当前结论
 
-`NO — prerequisite documents incomplete`
+`NO — trigger audit completed but FAIL`
 
 ## 9. 若不具备，缺失项清单
 
@@ -100,7 +100,7 @@
 
 - Trigger Audit Delivery 已完成但未产生合法 trigger
 - Bootstrap Sign-Stability Preregistration 已完成（结果填报仍待后续执行）
-- 2008 T5 candidate-side 已同口径尝试运行并失败为 `FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS`；不影响 trigger audit 失败结论
+- 2008 T5 candidate-side 已同口径尝试运行并失败，主因已裁决为 `UPSTREAM_DATA_EDGE_CASE_CONFIRMED`；不影响 trigger audit 失败结论
 
 ## 10. 禁止绕过条款
 

@@ -35,21 +35,21 @@
 - 该值取自锁定 benchmark family 中 2008 年 `std(z)` 最低者：`EGARCH(1,1)-Normal`
 - 该值仅用于 Phase 0A 条件 D 的合法分母，不构成对 T5 的追溯性真正 OOS 证明
 
-## 3. T5 三窗口结果
+## 3. T5 四窗口结果
 
-> 说明：`src/research/run_phase0a_t5_reproduction.py` 已回接 `/tmp/qfs-sigma/repo` 中原始 `T5_resid_persistence_M4` 来源，并在当前仓库内完成三窗口复现。详见 `docs/phase0b/02_t5_reproduction_note.md`。
+> 说明：`src/research/run_phase0a_t5_reproduction.py` 已回接 `/tmp/qfs-sigma/repo` 中原始 `T5_resid_persistence_M4` 来源，并在当前仓库内完成四窗口复现。详见 `docs/phase0b/02_t5_reproduction_note.md`。
 
 | 模型 | 窗口 | mean(z) | std(z) | corr_next | rank_next | lag1_acf(z) | sigma_blowup | pathology | CRPS | 状态 |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
 | T5_resid_persistence_M4 | 2008-01-04 -> 2008-12-26 | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS |
 | T5_resid_persistence_M4 | 2017-07-07 -> 2017-12-29 | 1.743954 | 2.010464 | 0.629802 | 0.776923 | 0.923395 | 0 | 0 | 0.086197 | PASS |
-| T5_resid_persistence_M4 | 2018-07-06 -> 2018-12-28 | -1.795901 | 2.262279 | 0.363253 | 0.533846 | 0.754082 | 0 | 0 | 0.067886 | PASS |
-| T5_resid_persistence_M4 | 2020-01-03 -> 2020-06-26 | 1.047204 | 2.489387 | -0.043688 | 0.013913 | 0.770902 | 0 | 0 | 0.055013 | PASS |
+| T5_resid_persistence_M4 | 2018-07-06 -> 2018-12-28 | -1.880406 | 1.976233 | 0.386938 | 0.535385 | 0.842405 | 0 | 0 | 0.067559 | PASS |
+| T5_resid_persistence_M4 | 2020-01-03 -> 2020-06-26 | 1.057614 | 2.380050 | -0.033011 | 0.020000 | 0.757961 | 0 | 0 | 0.054682 | PASS |
 
 ### 3.1 T5 复现边界
 
 - 当前复现口径是原始 pilot 的 `T5_resid_persistence_M4`，不是后续 `R1 base + T5 score` 变体。
-- 2017 `std(z)` 与历史 checksum 接近；2018 / 2020 与历史 checksum 存在 mismatch，当前文档以当前仓库真实 runner 输出为准。
+- 源码等价性已在 `docs/phase0b/02_t5_source_parity_audit.md` 中确认；`LOGSIG_PAD` 已修正为历史值 `0.35` 后重跑。
 - 2008 T5 candidate-side 已按同一口径尝试运行，结果为 `FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS`。
 
 ## 4. 四个 benchmark 的三窗口结果
@@ -111,36 +111,37 @@
 ## 6. T5 vs Benchmark 对照表
 
 > 说明：
-> - T5 candidate-side 三窗口结果已由当前仓库 runner 复现。
+> - T5 candidate-side 四窗口结果已由当前仓库 runner 重跑。
 > - 2020 列用于验证 benchmark 是否对 T5 形成材料性支配的必要条件之一。
 > - 2008 T5 candidate-side 已按同一口径尝试运行，但结果为 `FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS`。
 
 | 比较对象 | 2020 benchmark std(z) | 2020 T5 std(z) | 2020 是否优于 T5 至少 0.05 且 >=2% | 2008 是否超过 Benchmark_2008_std(z)+0.10 | 安全/方向性是否不劣于 T5 | 是否形成材料性支配 | 备注 |
 |---|---:|---:|---|---|---|---|---|
-| T5 vs EGARCH(1,1)-Normal | 0.810571 | 2.489387 | YES | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | NO | NO | 2020 scale 明显优于 T5；2018 benchmark directionality 弱于 T5，且 2008 T5 无可用数值 |
-| T5 vs EGARCH(1,1)-Student-t | 0.811930 | 2.489387 | YES | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | NO | NO | 2020 scale 明显优于 T5；2018 benchmark directionality 弱于 T5，且 2008 T5 无可用数值 |
-| T5 vs GJR-GARCH(1,1)-Normal | 1.341203 | 2.489387 | YES | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | NO | NO | 2020 scale 明显优于 T5；2018 benchmark directionality 弱于 T5，且 2008 T5 无可用数值 |
-| T5 vs GJR-GARCH(1,1)-Student-t | 1.272282 | 2.489387 | YES | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | NO | NO | 2020 scale 明显优于 T5；2018 benchmark directionality 弱于 T5，且 2008 T5 无可用数值 |
+| T5 vs EGARCH(1,1)-Normal | 0.810571 | 2.380050 | YES | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | NO | NO | 2020 scale 明显优于 T5；2018 benchmark directionality 弱于 T5，且 2008 T5 因上游数据边界无可用数值 |
+| T5 vs EGARCH(1,1)-Student-t | 0.811930 | 2.380050 | YES | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | NO | NO | 2020 scale 明显优于 T5；2018 benchmark directionality 弱于 T5，且 2008 T5 因上游数据边界无可用数值 |
+| T5 vs GJR-GARCH(1,1)-Normal | 1.341203 | 2.380050 | YES | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | NO | NO | 2020 scale 明显优于 T5；2018 benchmark directionality 弱于 T5，且 2008 T5 因上游数据边界无可用数值 |
+| T5 vs GJR-GARCH(1,1)-Student-t | 1.272282 | 2.380050 | YES | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | NO | NO | 2020 scale 明显优于 T5；2018 benchmark directionality 弱于 T5，且 2008 T5 因上游数据边界无可用数值 |
 
 ### 6.1 材料性支配判定
 
 - benchmark family 在 2020 的 `std(z)` 全部显著低于当前复现的 T5。
 - 但 benchmark family 在 2018 的 `corr_next` / `rank_next` 为负，而 T5 在 2018 为正；因此不能说安全/方向性全局不劣于 T5。
-- 2008 T5 candidate-side 无可用数值，且 benchmark 在 2018 directionality 弱于 T5，完整材料性支配判定为 `NO`。
+- 2008 T5 candidate-side 无可用数值，主因已裁决为 `UPSTREAM_DATA_EDGE_CASE_CONFIRMED`；benchmark 在 2018 directionality 弱于 T5，完整材料性支配判定为 `NO`。
 
 ## 7. Phase 0A 五分支的当前占位判断
 
 | 分支 | 当前占位判断 | 依据 | 当前状态 |
 |---|---|---|---|
-| 分支一：T5 特有缺陷 | YES | 原始 T5 在 2008 同口径 candidate-side 运行中失败为 `FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS`，而四个 benchmark 均产出 2008 数值结果 | YES |
-| 分支二：连续危机波动模型共同上限 | NO | benchmark family 可在 2008 产出数值但方向性失败；T5 在 2008 无法产出数值，失败形态不是共同上限 | NO |
-| 分支三：危机样本异质，不支持统一危机层 | YES | benchmark family 在 2020 与 2008 呈断裂式异质表现；T5 当前三窗口也显示 2018/2020 residual scale 与 directionality 不一致 | YES |
+| 分支一：T5 特有缺陷 | NO | 源码对齐后 2008 T5 仍失败，但 forensic audit 将主因裁决为 `UPSTREAM_DATA_EDGE_CASE_CONFIRMED`，不是 `_fit_t5` / `_predict_t5` 内部不稳定，也不是迁移偏差 | NO |
+| 分支二：连续危机波动模型共同上限 | NO | benchmark family 可在 2008 产出数值，T5 失败来自上游数据边界；失败形态不是连续危机波动模型共同上限 | NO |
+| 分支三：危机样本异质，不支持统一危机层 | YES | benchmark family 在 2020 与 2008 呈断裂式异质表现；T5 2018/2020 residual scale 与 directionality 也不一致 | YES |
 | 分支四：T5 Success 但被 benchmark 材料性支配 | NO | T5 2020 自身未达标，且 benchmark 在 2018 directionality 不劣条件不成立；不能写完整材料性支配成立 | NO |
-| 分支五：T5 足够，无需继续修补 | NO | T5 2020 `std(z)=2.489387`，`corr_next=-0.043688`，且 2008 candidate-side 无法产出数值 | NO |
+| 分支五：T5 足够，无需继续修补 | NO | T5 2020 `std(z)=2.380050`、`corr_next=-0.033011`，且 2008 candidate-side 因上游数据边界无法产出数值 | NO |
 
 ### 7.1 当前最稳妥的占位判断
 
-- T5 candidate-side 三窗口已可复现，2008 candidate-side 已尝试同口径运行但失败。
+- T5 源码层已与历史来源对齐，裁决为 `SOURCE_EQUIVALENCE_CONFIRMED_AFTER_PATCH`。
+- 2008 T5 candidate-side 失败主因是 `UPSTREAM_DATA_EDGE_CASE_CONFIRMED`。
 - 当前分支占位不授权 Phase 0B 入场；trigger audit 仍为 `FAIL`。
 
 ## 8. 当前是否完成 Benchmark Delivery
@@ -170,7 +171,7 @@
 ### 证据边界
 
 - 本文只冻结 benchmark delivery 的实际结果。
-- T5 candidate-side 三窗口已由当前仓库 runner 复现；2008 T5 candidate-side 已同口径尝试运行并落盘为 `FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS`。
+- T5 candidate-side 四窗口已由当前仓库 runner 重跑；2008 T5 candidate-side 失败已归因为 `UPSTREAM_DATA_EDGE_CASE_CONFIRMED`。
 - 本文不负责 trigger audit。
 - 本文不负责 bootstrap sign-stability 阈值预注册。
 - 本文不提供 crisis architecture 的立项批准。
