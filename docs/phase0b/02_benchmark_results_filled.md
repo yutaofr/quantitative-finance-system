@@ -41,6 +41,7 @@
 
 | 模型 | 窗口 | mean(z) | std(z) | corr_next | rank_next | lag1_acf(z) | sigma_blowup | pathology | CRPS | 状态 |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| T5_resid_persistence_M4 | 2008-01-04 -> 2008-12-26 | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS |
 | T5_resid_persistence_M4 | 2017-07-07 -> 2017-12-29 | 1.743954 | 2.010464 | 0.629802 | 0.776923 | 0.923395 | 0 | 0 | 0.086197 | PASS |
 | T5_resid_persistence_M4 | 2018-07-06 -> 2018-12-28 | -1.795901 | 2.262279 | 0.363253 | 0.533846 | 0.754082 | 0 | 0 | 0.067886 | PASS |
 | T5_resid_persistence_M4 | 2020-01-03 -> 2020-06-26 | 1.047204 | 2.489387 | -0.043688 | 0.013913 | 0.770902 | 0 | 0 | 0.055013 | PASS |
@@ -49,7 +50,7 @@
 
 - 当前复现口径是原始 pilot 的 `T5_resid_persistence_M4`，不是后续 `R1 base + T5 score` 变体。
 - 2017 `std(z)` 与历史 checksum 接近；2018 / 2020 与历史 checksum 存在 mismatch，当前文档以当前仓库真实 runner 输出为准。
-- 2008 T5 candidate-side 结果仍未运行，本轮不补 2008 T5。
+- 2008 T5 candidate-side 已按同一口径尝试运行，结果为 `FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS`。
 
 ## 4. 四个 benchmark 的三窗口结果
 
@@ -112,35 +113,35 @@
 > 说明：
 > - T5 candidate-side 三窗口结果已由当前仓库 runner 复现。
 > - 2020 列用于验证 benchmark 是否对 T5 形成材料性支配的必要条件之一。
-> - 2008 T5 candidate-side 结果仍未运行，因此涉及 2008 T5 的完整材料性支配判定仍保持不可判定。
+> - 2008 T5 candidate-side 已按同一口径尝试运行，但结果为 `FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS`。
 
 | 比较对象 | 2020 benchmark std(z) | 2020 T5 std(z) | 2020 是否优于 T5 至少 0.05 且 >=2% | 2008 是否超过 Benchmark_2008_std(z)+0.10 | 安全/方向性是否不劣于 T5 | 是否形成材料性支配 | 备注 |
 |---|---:|---:|---|---|---|---|---|
-| T5 vs EGARCH(1,1)-Normal | 0.810571 | 2.489387 | YES | FAILED_TO_RUN_MISSING_T5_2008 | NO | PENDING | 2020 scale 明显优于 T5；2018 benchmark directionality 弱于 T5，且缺 2008 T5 |
-| T5 vs EGARCH(1,1)-Student-t | 0.811930 | 2.489387 | YES | FAILED_TO_RUN_MISSING_T5_2008 | NO | PENDING | 2020 scale 明显优于 T5；2018 benchmark directionality 弱于 T5，且缺 2008 T5 |
-| T5 vs GJR-GARCH(1,1)-Normal | 1.341203 | 2.489387 | YES | FAILED_TO_RUN_MISSING_T5_2008 | NO | PENDING | 2020 scale 明显优于 T5；2018 benchmark directionality 弱于 T5，且缺 2008 T5 |
-| T5 vs GJR-GARCH(1,1)-Student-t | 1.272282 | 2.489387 | YES | FAILED_TO_RUN_MISSING_T5_2008 | NO | PENDING | 2020 scale 明显优于 T5；2018 benchmark directionality 弱于 T5，且缺 2008 T5 |
+| T5 vs EGARCH(1,1)-Normal | 0.810571 | 2.489387 | YES | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | NO | NO | 2020 scale 明显优于 T5；2018 benchmark directionality 弱于 T5，且 2008 T5 无可用数值 |
+| T5 vs EGARCH(1,1)-Student-t | 0.811930 | 2.489387 | YES | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | NO | NO | 2020 scale 明显优于 T5；2018 benchmark directionality 弱于 T5，且 2008 T5 无可用数值 |
+| T5 vs GJR-GARCH(1,1)-Normal | 1.341203 | 2.489387 | YES | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | NO | NO | 2020 scale 明显优于 T5；2018 benchmark directionality 弱于 T5，且 2008 T5 无可用数值 |
+| T5 vs GJR-GARCH(1,1)-Student-t | 1.272282 | 2.489387 | YES | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | NO | NO | 2020 scale 明显优于 T5；2018 benchmark directionality 弱于 T5，且 2008 T5 无可用数值 |
 
 ### 6.1 材料性支配判定
 
 - benchmark family 在 2020 的 `std(z)` 全部显著低于当前复现的 T5。
 - 但 benchmark family 在 2018 的 `corr_next` / `rank_next` 为负，而 T5 在 2018 为正；因此不能说安全/方向性全局不劣于 T5。
-- 2008 T5 candidate-side 结果缺失，完整材料性支配判定仍为 `PENDING`。
+- 2008 T5 candidate-side 无可用数值，且 benchmark 在 2018 directionality 弱于 T5，完整材料性支配判定为 `NO`。
 
 ## 7. Phase 0A 五分支的当前占位判断
 
 | 分支 | 当前占位判断 | 依据 | 当前状态 |
 |---|---|---|---|
-| 分支一：T5 特有缺陷 | PENDING | T5 三窗口已复现，但缺 2008 T5 candidate-side 对照；benchmark 2008 自身方向性倒置 | PENDING |
-| 分支二：连续危机波动模型共同上限 | PENDING | T5 与 benchmark 在 2020/2008 呈现不同失败形态，但缺 T5 2008，不能闭合共同上限判断 | PENDING |
+| 分支一：T5 特有缺陷 | YES | 原始 T5 在 2008 同口径 candidate-side 运行中失败为 `FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS`，而四个 benchmark 均产出 2008 数值结果 | YES |
+| 分支二：连续危机波动模型共同上限 | NO | benchmark family 可在 2008 产出数值但方向性失败；T5 在 2008 无法产出数值，失败形态不是共同上限 | NO |
 | 分支三：危机样本异质，不支持统一危机层 | YES | benchmark family 在 2020 与 2008 呈断裂式异质表现；T5 当前三窗口也显示 2018/2020 residual scale 与 directionality 不一致 | YES |
-| 分支四：T5 Success 但被 benchmark 材料性支配 | PENDING | 2020 benchmark scale 明显优于 T5，但 2018 directionality 不劣条件不成立，且缺 2008 T5 | PENDING |
-| 分支五：T5 足够，无需继续修补 | NO | T5 2020 `std(z)=2.489387`，`corr_next=-0.043688`，未满足稳定 directionality / scale 证据 | NO |
+| 分支四：T5 Success 但被 benchmark 材料性支配 | NO | T5 2020 自身未达标，且 benchmark 在 2018 directionality 不劣条件不成立；不能写完整材料性支配成立 | NO |
+| 分支五：T5 足够，无需继续修补 | NO | T5 2020 `std(z)=2.489387`，`corr_next=-0.043688`，且 2008 candidate-side 无法产出数值 | NO |
 
 ### 7.1 当前最稳妥的占位判断
 
-- T5 candidate-side 三窗口已可复现，但不是 Phase 0B 入场批准。
-- 当前最直接成立的是危机样本异质性证据；T5 是否被 benchmark 完整材料性支配仍需 2008 T5 candidate-side 对照。
+- T5 candidate-side 三窗口已可复现，2008 candidate-side 已尝试同口径运行但失败。
+- 当前分支占位不授权 Phase 0B 入场；trigger audit 仍为 `FAIL`。
 
 ## 8. 当前是否完成 Benchmark Delivery
 
@@ -150,26 +151,26 @@
 
 ### 8.2 仍然阻塞 Phase 0B 的项
 
-- Trigger Audit Delivery：未完成
-- Bootstrap Sign-Stability Preregistration：未完成
+- Trigger Audit Delivery：已完成但 `FAIL`，合法 `PASS` trigger 数量为 0
+- Bootstrap Sign-Stability Preregistration：已完成
 
 ### 8.3 不能说的结论
 
 1. 不能说 Phase 0B 已具立项资格。  
 2. 不能把 2008 benchmark 结果夸大为 T5 的真正 OOS 证明。  
 3. 不能把 benchmark family 在 2008 的失败掩盖为实现噪声。  
-4. 不能在 trigger audit 与 bootstrap 预注册完成前宣布进入 Phase 0B。  
+4. 不能在 trigger audit 已完成但 `FAIL` 的情况下宣布进入 Phase 0B。  
 
 ## 9. 阻塞项与证据边界
 
 ### 阻塞项
 
-- Trigger audit 与 bootstrap prereg 仍未完成，故 Phase 0B 入口仍然关闭。
+- Trigger audit 已完成但 `FAIL`，合法 `PASS` trigger 数量为 0，故 Phase 0B 入口仍然关闭。
 
 ### 证据边界
 
 - 本文只冻结 benchmark delivery 的实际结果。
-- T5 candidate-side 三窗口已由当前仓库 runner 复现；2008 T5 candidate-side 结果仍未运行，相关 2008 对照字段保留为 `FAILED_TO_RUN_MISSING_T5_2008`。
+- T5 candidate-side 三窗口已由当前仓库 runner 复现；2008 T5 candidate-side 已同口径尝试运行并落盘为 `FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS`。
 - 本文不负责 trigger audit。
 - 本文不负责 bootstrap sign-stability 阈值预注册。
 - 本文不提供 crisis architecture 的立项批准。

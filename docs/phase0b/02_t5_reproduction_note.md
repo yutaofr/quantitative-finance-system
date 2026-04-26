@@ -56,12 +56,13 @@ src/research/run_phase0a_t5_reproduction.py
 | embargo | 53 周；`train_end = as_of - 53 weeks` |
 | history frame | `R1_TRAIN_WINDOW + 54` |
 | output frequency | 周频；`frame.feature_dates`，Friday-close aligned |
-| windows | 2017 / 2018 / 2020 三个固定 pilot window |
+| windows | 2008 benchmark window + 2017 / 2018 / 2020 三个固定 pilot window |
 
 ## 6. 三窗口 T5 结果总表
 
 | 模型 | 窗口 | mean(z) | std(z) | corr_next | rank_next | lag1_acf(z) | sigma_blowup | pathology | CRPS | 状态 |
 |---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| T5_resid_persistence_M4 | 2008-01-04 -> 2008-12-26 | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS | FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS |
 | T5_resid_persistence_M4 | 2017-07-07 -> 2017-12-29 | 1.743954 | 2.010464 | 0.629802 | 0.776923 | 0.923395 | 0 | 0 | 0.086197 | PASS |
 | T5_resid_persistence_M4 | 2018-07-06 -> 2018-12-28 | -1.795901 | 2.262279 | 0.363253 | 0.533846 | 0.754082 | 0 | 0 | 0.067886 | PASS |
 | T5_resid_persistence_M4 | 2020-01-03 -> 2020-06-26 | 1.047204 | 2.489387 | -0.043688 | 0.013913 | 0.770902 | 0 | 0 | 0.055013 | PASS |
@@ -78,20 +79,34 @@ src/research/run_phase0a_t5_reproduction.py
 
 当前执行路径确认是原始 `T5_resid_persistence_M4`，但 2018 / 2020 的 `std(z)` 与历史 checksum 偏差明显。最小解释边界：当前仓库数据、依赖代码或缓存状态与 `/tmp/qfs-sigma/repo` 历史运行环境不完全一致；本文不使用历史数字覆盖当前真实跑批结果。
 
-## 8. 与 `02_benchmark_results_filled.md` 的同步关系
+
+## 8. 2008 candidate-side result
+
+| 项目 | 结果 |
+|---|---|
+| window | `2008-01-04 -> 2008-12-26` |
+| benchmark 口径一致性 | YES: 周频 Friday-close aligned、rolling fixed-length、416 周训练窗、53 周 embargo、同一 recovered T5 数据路径 |
+| actual call path | `run_phase0a_t5_reproduction.py -> run_original_t5_reproduction() -> _eval_original_t5_window()` |
+| run status | `FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS` |
+| failure point | 原始 T5 在 2008 首个 as_of 的训练窗中生成非有限 standardized residuals，无法合法计算 empirical standardized residual quantiles |
+| 是否改口径重跑 | NO |
+
+2008 完整指标均为 `FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS`，因此不能生成 2008 T5 `std(z)`、directionality 或 CRPS 数值。
+
+## 9. 与 `02_benchmark_results_filled.md` 的同步关系
 
 `docs/phase0b/02_benchmark_results_filled.md` 已用当前 runner 真实结果替换 T5 三窗口 `FAILED_TO_RUN_MISSING_T5_SOURCE`。
 
 Benchmark 四模型结果未重跑、未修改。
 
-## 9. 是否成功替换 `FAILED_TO_RUN`
+## 10. 是否成功替换 `FAILED_TO_RUN`
 
-已成功替换 T5 三窗口 candidate-side 结果。
+已成功替换 2017 / 2018 / 2020 三窗口 candidate-side 结果。
 
-仍未补 2008 T5 candidate-side run；该项不是本轮任务范围。
+2008 candidate-side 已按同口径尝试运行，但结果为 `FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS`。
 
-## 10. 未解决阻塞项
+## 11. 未解决阻塞项
 
 - 2018 / 2020 `std(z)` 与历史 checksum 存在 mismatch。
-- 2008 T5 candidate-side 结果仍未在当前仓库内落盘。
+- 2008 T5 candidate-side 已落盘为 `FAILED_TO_RUN_NONFINITE_STANDARDIZED_RESIDUALS`，无可用数值指标。
 - Phase 0B 入口仍受 trigger audit `FAIL` 约束，不能因 T5 三窗口复现而打开。

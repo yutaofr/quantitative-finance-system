@@ -43,6 +43,7 @@ HAR_CORE = ("NASDAQXNDX_rv1d", "NASDAQXNDX_rv5d", "NASDAQXNDX_rv22d")
 IV_SLOPES = ("term_vix9d_vix", "term_vix_vix3m", "term_vix9d_vix3m")
 BASE_MODEL_M4 = "M4_har_plus_iv_slopes"
 WINDOWS = (
+    (date(2008, 1, 4), date(2008, 12, 26)),
     (date(2017, 7, 7), date(2017, 12, 29)),
     (date(2018, 7, 6), date(2018, 12, 28)),
     (date(2020, 1, 3), date(2020, 6, 26)),
@@ -543,7 +544,10 @@ def _eval_original_t5_window(context: HarFeatureContext, start: date, end: date)
         fit = _fit_t5(train_base)
         sigma_hat, _aux = _predict_t5(prev_abs_e, prev_sigma, base_sigma, fit)
         std_resid = train_base.resid_train / np.maximum(train_base.sigma_train, SIGMA_EPS)
-        std_q = np.quantile(std_resid[np.isfinite(std_resid)], FULL_TAUS).astype(np.float64)
+        finite_std_resid = std_resid[np.isfinite(std_resid)]
+        if finite_std_resid.size == 0:
+            raise ValueError("NONFINITE_STANDARDIZED_RESIDUALS")
+        std_q = np.quantile(finite_std_resid, FULL_TAUS).astype(np.float64)
         std_q = np.maximum.accumulate(std_q)
         mu_hat, y = _same_week_mu_and_y(train_base.history_frame, train_base.history_returns, train_base.mu_beta, as_of)
         q = np.maximum.accumulate((mu_hat + sigma_hat * std_q).astype(np.float64))
@@ -594,11 +598,28 @@ def run_original_t5_reproduction() -> dict[str, Any]:
     windows: dict[str, Any] = {}
     for start, end in WINDOWS:
         key = f"{start.isoformat()}__{end.isoformat()}"
-        arr = _eval_original_t5_window(context, start, end)
-        windows[key] = {
-            "window": {"start": start.isoformat(), "end": end.isoformat()},
-            "metrics": _window_metrics(arr),
-        }
+        try:
+            arr = _eval_original_t5_window(context, start, end)
+            windows[key] = {
+                "window": {"start": start.isoformat(), "end": end.isoformat()},
+                "metrics": _window_metrics(arr),
+                "status": "PASS",
+            }
+        except (ValueError, FloatingPointError, np.linalg.LinAlgError, IndexError) as exc:
+            windows[key] = {
+                "window": {"start": start.isoformat(), "end": end.isoformat()},
+                "metrics": {
+                    "mean_z": f"FAILED_TO_RUN_{exc}",
+                    "std_z": f"FAILED_TO_RUN_{exc}",
+                    "corr_next": f"FAILED_TO_RUN_{exc}",
+                    "rank_next": f"FAILED_TO_RUN_{exc}",
+                    "lag1_acf_z": f"FAILED_TO_RUN_{exc}",
+                    "sigma_blowup": f"FAILED_TO_RUN_{exc}",
+                    "pathology": f"FAILED_TO_RUN_{exc}",
+                    "crps": f"FAILED_TO_RUN_{exc}",
+                },
+                "status": f"FAILED_TO_RUN_{exc}",
+            }
     return {
         "model": "T5_resid_persistence_M4",
         "base_model": BASE_MODEL_M4,
