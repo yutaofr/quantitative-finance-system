@@ -76,11 +76,11 @@ T5 的选择过程已经暴露于后续危机样本信息，尤其 2020。
 
 | 字段 | 取值 | 状态 | 说明 |
 |---|---|---|---|
-| bootstrap 方案 | UNFILLED | UNFILLED | 必须锁定 |
-| block 长度 | UNFILLED | UNFILLED | 必须锁定 |
-| 采样次数 | UNFILLED | UNFILLED | 必须锁定 |
-| 随机种子策略 | UNFILLED | UNFILLED | 必须锁定 |
-| 失败时如何处理数值异常 | UNFILLED | UNFILLED | 必须锁定 |
+| bootstrap 方案 | block bootstrap | LOCKED | 预注册后不得改为其他重采样方案 |
+| block 长度 | 20 个观测点 | LOCKED | 预注册后不得更改 |
+| 采样次数 | 400 | LOCKED | 预注册后不得更改 |
+| 随机种子策略 | 固定随机种子 `20260426` | LOCKED | 预注册后不得更改 |
+| 失败时如何处理数值异常 | 任一窗口任一对象出现采样运行失败或数值异常，记为 `FAILED_TO_RUN_BOOTSTRAP` | LOCKED | 不得以补跑结果覆盖失败记录 |
 
 ## 8. 检验对象锁定
 
@@ -92,8 +92,8 @@ T5 的选择过程已经暴露于后续危机样本信息，尤其 2020。
 
 | 检验对象 | 是否纳入 sign-stability | 通过阈值 | 状态 | 备注 |
 |---|---|---|---|---|
-| `corr_next` | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
-| `rank_next` | UNFILLED | UNFILLED | UNFILLED | UNFILLED |
+| `corr_next` | 是 | `metric > 0` 的频率 `>= 0.60` | LOCKED | 必须与 `rank_next` 同时检验，不允许单检 |
+| `rank_next` | 是 | `metric > 0` 的频率 `>= 0.60` | LOCKED | 必须与 `corr_next` 同时检验，不允许单检 |
 
 ### 法理要求
 
@@ -108,8 +108,27 @@ T5 的选择过程已经暴露于后续危机样本信息，尤其 2020。
 | OOS 使用 | 2008 被用于训练/调参/超参数选择 | LOCKED |
 | sign-stability | 检验对象未预注册 | LOCKED |
 | sign-stability | 阈值未预注册 | LOCKED |
+| sign-stability | `corr_next > 0` 的频率 `< 0.60` | LOCKED |
+| sign-stability | `rank_next > 0` 的频率 `< 0.60` | LOCKED |
+| sign-stability | 任一窗口任一对象出现采样运行失败或数值异常，记为 `FAILED_TO_RUN_BOOTSTRAP` | LOCKED |
 | sign-stability | 看结果后改 block 长度 | LOCKED |
 | sign-stability | 看结果后改单检/双检对象 | LOCKED |
+
+## 9.1 双检通过规则（窗口级）
+
+窗口级通过必须同时满足：
+
+1. `corr_next_sign_stability >= 0.60`
+2. `rank_next_sign_stability >= 0.60`
+
+任一条件不满足即窗口失败。
+
+## 9.2 证据边界
+
+1. Bootstrap sign-stability prereg 的完成，只意味着 directionality 稳健性审计规则已冻结。
+2. 该完成状态不会覆盖 Trigger Audit Delivery 当前 `FAIL` 结论。
+3. 该完成状态不授权进入 Phase 0B。
+4. 只有四项前置交付都满足且 trigger 至少有一个合法 `PASS`，Phase 0B 才可能立项。
 
 ## 10. 禁止事项
 
@@ -127,6 +146,6 @@ T5 的选择过程已经暴露于后续危机样本信息，尤其 2020。
 | 2000–2002 是否冻结为异质验证集 | PASS | 已写死 |
 | 2020 使用边界是否写死 | PASS | 已写死 |
 | Stage A 的 OOS 证据边界是否写死 | PASS | 已写死 |
-| bootstrap 方案字段是否完整 | UNFILLED | UNFILLED |
-| `corr_next` / `rank_next` 检验对象是否锁定 | UNFILLED | UNFILLED |
-| 所有关键 `UNFILLED` 是否清空 | UNFILLED | 若否，则不得进入 Phase 0B |
+| bootstrap 方案字段是否完整 | PASS | block bootstrap / block=20 / n_boot=400 / seed=20260426 已写死 |
+| `corr_next` / `rank_next` 检验对象是否锁定 | PASS | 双检对象与阈值 `>=0.60` 已写死 |
+| 所有关键 `UNFILLED` 是否清空 | PASS | prereg 关键字段已清空；结果文档另行交付 |

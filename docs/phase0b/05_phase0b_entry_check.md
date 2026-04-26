@@ -31,7 +31,7 @@
 | Benchmark Delivery | `docs/phase0b/01_benchmark_lock.md` + `docs/phase0b/02_benchmark_results_filled.md` | PASS | PASS | 否 | PASS |
 | Trigger Audit Delivery | `docs/phase0b/03_trigger_audit_prereg.md` + `docs/phase0b/03_trigger_audit_results_filled.md` | PASS | PASS | 否 | FAIL |
 | OOS Boundary Freeze | `docs/phase0b/04_oos_and_sign_stability_prereg.md` | PASS | PASS | 否 | PASS |
-| Bootstrap Sign-Stability Preregistration | `docs/phase0b/04_oos_and_sign_stability_prereg.md` | PASS | UNFILLED | 是 | UNFILLED |
+| Bootstrap Sign-Stability Preregistration | `docs/phase0b/04_oos_and_sign_stability_prereg.md` + `docs/phase0b/04_bootstrap_sign_stability_plan.md` | PASS | PASS | 否 | PASS |
 
 ## 4. Benchmark 完成状态
 
@@ -71,13 +71,13 @@
 
 | 检查项 | 状态 | 备注 |
 |---|---|---|
-| bootstrap 方案是否锁定 | UNFILLED | UNFILLED |
-| block 长度是否锁定 | UNFILLED | UNFILLED |
-| 采样次数是否锁定 | UNFILLED | UNFILLED |
-| `corr_next` 是否纳入检验对象并写死阈值 | UNFILLED | UNFILLED |
-| `rank_next` 是否纳入检验对象并写死阈值 | UNFILLED | UNFILLED |
-| 是否仍含关键 `UNFILLED` | UNFILLED | UNFILLED |
-| 当前状态（PASS / FAIL / UNFILLED） | UNFILLED | UNFILLED |
+| bootstrap 方案是否锁定 | PASS | block bootstrap 已写死 |
+| block 长度是否锁定 | PASS | 20 个观测点已写死 |
+| 采样次数是否锁定 | PASS | 400 次已写死 |
+| `corr_next` 是否纳入检验对象并写死阈值 | PASS | 纳入且阈值 `>= 0.60` 已写死 |
+| `rank_next` 是否纳入检验对象并写死阈值 | PASS | 纳入且阈值 `>= 0.60` 已写死 |
+| 是否仍含关键 `UNFILLED` | NO | prereg 字段已清空；计划文档结果区 `UNFILLED` 属预期占位 |
+| 当前状态（PASS / FAIL / UNFILLED） | PASS | Bootstrap Sign-Stability Preregistration 已完成 |
 
 ## 8. 当前是否具备立项资格
 
@@ -98,7 +98,7 @@
 > 若第 8 节不是 YES，则必须逐项列出仍未完成的部分。
 
 - Trigger Audit Delivery 已完成但未产生合法 trigger
-- Bootstrap Sign-Stability Preregistration 未完成
+- Bootstrap Sign-Stability Preregistration 已完成（结果填报仍待后续执行）
 
 ## 10. 禁止绕过条款
 
@@ -114,7 +114,7 @@
 - Benchmark Delivery：`PASS`
 - Trigger Audit Delivery：`FAIL`
 - OOS Boundary Freeze：`PASS`
-- Bootstrap Sign-Stability Preregistration：`UNFILLED`
+- Bootstrap Sign-Stability Preregistration：`PASS`
 
 > 注意  
 > OOS 边界冻结与 bootstrap 预注册是两个独立状态，不得合并解释。  
