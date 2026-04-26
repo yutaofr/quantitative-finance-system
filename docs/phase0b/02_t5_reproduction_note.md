@@ -1,93 +1,97 @@
 # T5 Reproduction Note
 
 > 文档性质  
-> 本文记录本仓库内 T5 可复现性定位与 runner 执行结果。本文不是新架构文档，不修改协议，不替代 benchmark 结果。
+> 本文记录原始 `T5_resid_persistence_M4` 从 `/tmp/qfs-sigma/repo` 回接到当前仓库后的可复现执行结果。本文不是新架构文档，不修改协议，不替代 benchmark family 结果。
 
 ## 1. 文档目的
 
-本文件用于回答：`Stage A = T5` 是否能在当前仓库内通过可执行 runner 复现 2017 / 2018 / 2020 三个固定窗口的诊断表。
+本文件用于回答：原始 pilot 中的 `T5_resid_persistence_M4` 是否能在当前仓库内通过可执行 runner 复现 2017 / 2018 / 2020 三个固定窗口的诊断表。
 
-## 2. T5 仓库内来源定位结果
+## 2. 原始 T5 来源路径
 
-### 2.1 指定历史脚本定位
-
-| 预期路径 | 是否存在 |
+| 来源文件 | 用途 |
 |---|---|
-| `src/research/run_ndx_sigma_output_transform_pilot.py` | 否 |
-| `src/research/run_ndx_sigma_output_refinement_pilot.py` | 否 |
-| `src/research/run_ndx_sigma_output_monotone_family_scan.py` | 否 |
+| `/tmp/qfs-sigma/repo/src/research/run_ndx_sigma_output_transform_pilot.py` | 原始 `T5_resid_persistence_M4` 定义、`_fit_t5`、`_predict_t5`、sigma_t 生成路径、三窗口切片 |
+| `/tmp/qfs-sigma/repo/src/research/run_ndx_sigma_output_refinement_pilot.py` | 后续 refinement 调用链参考；未用于替代原始 T5 定义 |
+| `/tmp/qfs-sigma/repo/src/research/run_ndx_sigma_output_monotone_family_scan.py` | 后续 monotone Stage B 口径参考；未用于替代原始 T5 定义 |
 
-### 2.2 关键词定位
+## 3. 迁移的最小函数
 
-| 关键词 | 仓库内结果 |
-|---|---|
-| `T5` | 仅出现在协议 / Phase 0B 文档中，未找到可执行 T5 fit/predict 代码 |
-| `_fit_t5` | 未找到 |
-| `_predict_t5` | 未找到 |
-| `residual persistence` | 未找到可执行实现 |
-| `rank correction` | 未找到可执行实现 |
-| `output transform` | 未找到可执行实现 |
-| `M4` | 未找到可执行 T5 base 定义 |
-| `R1` | 仅找到 R1 panel law / runner，与 T5 sigma output transform 来源未建立可执行连接 |
+迁移文件：`src/research/t5_recovered_source.py`
 
-### 2.3 四项来源问题
+迁移范围只覆盖原始 `T5_resid_persistence_M4` 复现所需函数：
 
-| 问题 | 当前状态 | 证据 |
+| 函数 / 对象 | 来源 | 当前用途 |
 |---|---|---|
-| T5 的 base 是什么 | UNRESOLVED_ORIGIN_DETAIL | 仓库内没有 T5 source 指明 base 是 M4、R1 或其他 |
-| T5 correction 结构是什么 | UNRESOLVED_ORIGIN_DETAIL | 未找到 `_fit_t5` / `_predict_t5` / residual persistence 实现 |
-| T5 训练窗与输出频率是什么 | UNRESOLVED_ORIGIN_DETAIL | 只有 benchmark lock 定义 416 周训练、53 周 embargo、周频 Friday 输出；没有 T5-specific source 确认 |
-| T5 最终 `sigma_t` 在哪里生成 | UNRESOLVED_ORIGIN_DETAIL | 指定 T5 pilot 脚本缺失，未找到最终 sigma_t 生成函数 |
+| `WINDOWS` | `run_ndx_sigma_output_transform_pilot.py` | 固定三窗口切片 |
+| `_fit_t5` | `run_ndx_sigma_output_transform_pilot.py` | 训练 residual-persistence 系数 `c` |
+| `_predict_t5` | `run_ndx_sigma_output_transform_pilot.py` | 生成 T5 corrected `sigma_t` |
+| `_build_train_base` | `run_ndx_sigma_output_transform_pilot.py` | 构造 416 周训练窗、53 周 embargo、M4 base sigma train path |
+| `_eval_original_t5_window` | 从原始 `_eval_transformed_window` 收窄 | 只执行 `T5_resid_persistence_M4` 分支 |
+| M4 HAR + IV slopes helpers | 原始 T5 上游依赖 | 复现 `M4_har_plus_iv_slopes` base sigma |
 
-## 3. 实际调用路径
+未迁移 T1/T2/T3/T4/T6、G 系列、B 系列、trigger、bootstrap、override、hard switch、MoE。
 
-本轮新增 runner：
+## 4. 当前仓库内实际调用链
 
-`src/research/run_phase0a_t5_reproduction.py`
+```text
+src/research/run_phase0a_t5_reproduction.py
+  -> research.t5_recovered_source.run_original_t5_reproduction()
+    -> build_har_context(max_window_end)
+    -> _eval_original_t5_window(context, start, end)
+      -> _build_train_base(context, "M4_har_plus_iv_slopes", as_of)
+      -> _fit_t5(train_base)
+      -> _predict_t5(prev_abs_e, prev_sigma, base_sigma, fit)
+      -> quantiles = mu_hat + sigma_hat * empirical standardized residual quantiles
+      -> _window_metrics(...)
+```
 
-实际执行路径：
+## 5. 训练窗与输出频率口径
 
-1. 扫描指定历史 T5 pilot 脚本路径
-2. 扫描仓库内 T5 / M4 / R1 / output transform / residual persistence / rank correction 关键词
-3. 判断是否存在可执行 T5 fit/predict 与 sigma_t 生成路径
-4. 输出结构化状态 `FAILED_TO_RUN_MISSING_T5_SOURCE`
-
-该 runner 不硬编码历史 T5 数字，不从对话上下文读取数字，不伪造三窗口结果。
-
-## 4. 训练窗与输出频率口径
-
-| 项目 | 当前状态 |
+| 项目 | 当前复现口径 |
 |---|---|
-| benchmark 口径 | rolling fixed-length window，训练窗 416 周，embargo 53 周，周频 Friday close |
-| T5-specific 训练窗定义 | UNRESOLVED_ORIGIN_DETAIL |
-| T5-specific 输出频率 | UNRESOLVED_ORIGIN_DETAIL |
-| 是否可合法假定完全等同 benchmark | 否，仓库内缺少 T5-specific source 证明 |
+| model | `T5_resid_persistence_M4` |
+| base model | `M4_har_plus_iv_slopes` |
+| train window | `R1_TRAIN_WINDOW = 416` |
+| embargo | 53 周；`train_end = as_of - 53 weeks` |
+| history frame | `R1_TRAIN_WINDOW + 54` |
+| output frequency | 周频；`frame.feature_dates`，Friday-close aligned |
+| windows | 2017 / 2018 / 2020 三个固定 pilot window |
 
-## 5. 三窗口 T5 结果总表
+## 6. 三窗口 T5 结果总表
 
 | 模型 | 窗口 | mean(z) | std(z) | corr_next | rank_next | lag1_acf(z) | sigma_blowup | pathology | CRPS | 状态 |
-|---|---|---|---|---|---|---|---|---|---|---|
-| T5 | 2017-07-07 -> 2017-12-29 | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE |
-| T5 | 2018-07-06 -> 2018-12-28 | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE |
-| T5 | 2020-01-03 -> 2020-06-26 | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE | FAILED_TO_RUN_MISSING_T5_SOURCE |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| T5_resid_persistence_M4 | 2017-07-07 -> 2017-12-29 | 1.743954 | 2.010464 | 0.629802 | 0.776923 | 0.923395 | 0 | 0 | 0.086197 | PASS |
+| T5_resid_persistence_M4 | 2018-07-06 -> 2018-12-28 | -1.795901 | 2.262279 | 0.363253 | 0.533846 | 0.754082 | 0 | 0 | 0.067886 | PASS |
+| T5_resid_persistence_M4 | 2020-01-03 -> 2020-06-26 | 1.047204 | 2.489387 | -0.043688 | 0.013913 | 0.770902 | 0 | 0 | 0.055013 | PASS |
 
-## 6. 与 `02_benchmark_results_filled.md` 的同步关系
+## 7. 与历史 checksum 的核对结果
 
-`docs/phase0b/02_benchmark_results_filled.md` 继续保留 T5 三窗口为 `FAILED_TO_RUN_MISSING_T5_SOURCE`，并将 T5-vs-benchmark 依赖字段保留为不可判定。
+历史 checksum 仅作为同源核对参考，未写入代码目标。
 
-Benchmark 已有四模型结果未修改。
+| 窗口 | 当前 std(z) | 历史参考 std(z) | 核对结果 |
+|---|---:|---:|---|
+| 2017 | 2.010464 | ≈ 2.016 | MATCH_WITHIN_TOLERANCE |
+| 2018 | 2.262279 | ≈ 1.931 | MISMATCH |
+| 2020 | 2.489387 | ≈ 2.361 | MISMATCH |
 
-## 7. 是否成功替换 `FAILED_TO_RUN`
+当前执行路径确认是原始 `T5_resid_persistence_M4`，但 2018 / 2020 的 `std(z)` 与历史 checksum 偏差明显。最小解释边界：当前仓库数据、依赖代码或缓存状态与 `/tmp/qfs-sigma/repo` 历史运行环境不完全一致；本文不使用历史数字覆盖当前真实跑批结果。
 
-未成功替换为数值结果。
+## 8. 与 `02_benchmark_results_filled.md` 的同步关系
 
-原因为：当前仓库内缺少 T5 的可执行来源定义，无法在不猜测的前提下重建 T5 fit/predict 与最终 `sigma_t` 生成路径。
+`docs/phase0b/02_benchmark_results_filled.md` 已用当前 runner 真实结果替换 T5 三窗口 `FAILED_TO_RUN_MISSING_T5_SOURCE`。
 
-## 8. 未解决阻塞项
+Benchmark 四模型结果未重跑、未修改。
 
-- 缺失函数：未找到 `_fit_t5`、`_predict_t5`
-- 缺失 runner：未找到指定三条 historical T5 pilot runner
-- 缺失 artifact：未找到可复现 T5 三窗口结果的仓库内 artifact
-- 缺失训练窗定义：未找到 T5-specific train window source
-- 缺失输出频率口径：未找到 T5-specific output frequency source
-- 缺失输入数据定义：未找到 T5 correction 所需输入特征与最终 `sigma_t` 生成定义
+## 9. 是否成功替换 `FAILED_TO_RUN`
+
+已成功替换 T5 三窗口 candidate-side 结果。
+
+仍未补 2008 T5 candidate-side run；该项不是本轮任务范围。
+
+## 10. 未解决阻塞项
+
+- 2018 / 2020 `std(z)` 与历史 checksum 存在 mismatch。
+- 2008 T5 candidate-side 结果仍未在当前仓库内落盘。
+- Phase 0B 入口仍受 trigger audit `FAIL` 约束，不能因 T5 三窗口复现而打开。
